@@ -1,0 +1,233 @@
+// Modèle de données Avisio — PostgreSQL.
+//
+// Souveraineté : l'instance de production est hébergée en France (OVHcloud
+// Gravelines ou AWS eu-west-3). Aucun avis ni contact ne sort de l'UE.
+//
+// Minimisation RGPD : le programme de fidélité ne stocke pas les coordonnées
+// du client, seulement un condensat (LoyaltyMember.contactHash). Les avis
+// contiennent le pseudonyme public affiché par la plateforme, tel que publié.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Plan {
+  essentiel
+  pro
+  premium
+}
+
+enum Addon {
+  negative_reviews
+  extra_platform
+  analytics
+  loyalty
+}
+
+enum Platform {
+  google
+  tripadvisor
+  facebook
+  yelp
+  thefork
+}
+
+enum Sector {
+  restaurant
+  bar
+  hotel
+  retail
+  beauty
+  health
+  other
+}
+
+enum ReviewStatus {
+  new
+  draft_ready
+  answered
+  ignored
+}
+
+enum AlertType {
+  negative_review
+  theme_trend
+  rating_drop
+}
+
+enum AlertSeverity {
+  info
+  warning
+  critical
+}
+
+enum TagMaterial {
+  sticker
+  chevalet
+  premium
+}
+
+enum LoyaltyChannel {
+  sms
+  email
+}
+
+model Manager {
+  id             String          @id
+  email          String          @unique
+  passwordHash   String
+  name           String
+  createdAt      DateTime        @default(now())
+  establishments Establishment[] @relation("ManagerEstablishments")
+
+  @@map("managers")
+}
+
+model Establishment {
+  id                String         @id
+  name              String
+  sector            Sector
+  postalCode        String
+  nafCode           String?
+  plan              Plan           @default(essentiel)
+  addons            Addon[]        @default([])
+  committed12Months Boolean        @default(false)
+  brandTone         String         @default("professionnel et courtois")
+  defaultLocale     String         @default("fr")
+  createdAt         DateTime       @default(now())
+
+  managers      Manager[]      @relation("ManagerEstablishments")
+  platformLinks PlatformLink[]
+  tags          NfcTag[]
+  scans         ScanEvent[]
+  reviews       Review[]
+  alerts        Alert[]
+  loyaltyMembers LoyaltyMember[]
+
+  // Le benchmark interroge (secteur, code postal) sur toute la base.
+  @@index([sector, postalCode])
+  @@index([nafCode, postalCode])
+  @@map("establishments")
+}
+
+model PlatformLink {
+  id              String   @id @default(uuid())
+  establishmentId String
+  platform        Platform
+  reviewUrl       String
+  externalId      String?
+  enabled         Boolean  @default(true)
+  reviewCount     Int      @default(0)
+  routedScans     Int      @default(0)
+  averageRating   Float?
+  lastSyncedAt    DateTime?
+
+  establishment Establishment @relation(fields: [establishmentId], references: [id], onDelete: Cascade)
+
+  @@unique([establishmentId, platform])
+  @@map("platform_links")
+}
+
+model NfcTag {
+  id              String      @id
+  establishmentId String
+  label           String
+  slug            String      @unique
+  material        TagMaterial @default(sticker)
+  scanCount       Int         @default(0)
+  lastScanAt      DateTime?
+  createdAt       DateTime    @default(now())
+
+  establishment Establishment @relation(fields: [establishmentId], references: [id], onDelete: Cascade)
+  scans         ScanEvent[]
+
+  @@index([establishmentId])
+  @@map("nfc_tags")
+}
+
+model ScanEvent {
+  id              String   @id
+  tagId           String
+  establishmentId String
+  platform        Platform
+  locale          String   @default("fr")
+  userAgent       String?
+  createdAt       DateTime @default(now())
+
+  tag           NfcTag        @relation(fields: [tagId], references: [id], onDelete: Cascade)
+  establishment Establishment @relation(fields: [establishmentId], references: [id], onDelete: Cascade)
+
+  @@index([establishmentId, createdAt])
+  @@map("scan_events")
+}
+
+model Review {
+  id              String       @id
+  establishmentId String
+  platform        Platform
+  externalId      String
+  author          String
+  rating          Int
+  comment         String
+  publishedAt     DateTime
+  ingestedAt      DateTime     @default(now())
+  status          ReviewStatus @default(new)
+  replyText       String?
+  repliedAt       DateTime?
+
+  // Résultat du pipeline NLP, dénormalisé pour éviter une jointure sur le
+  // chemin chaud du dashboard.
+  sentiment       String?
+  sentimentScore  Float?
+  themes          String[]     @default([])
+  keywords        String[]     @default([])
+  language        String?
+  analysisEngine  String?
+
+  establishment Establishment @relation(fields: [establishmentId], references: [id], onDelete: Cascade)
+  alerts        Alert[]
+
+  // Idempotence de l'ingestion : un avis de plateforme n'entre qu'une fois.
+  @@unique([establishmentId, platform, externalId])
+  @@index([establishmentId, publishedAt])
+  @@index([establishmentId, status])
+  @@map("reviews")
+}
+
+model Alert {
+  id              String        @id
+  establishmentId String
+  type            AlertType
+  severity        AlertSeverity @default(info)
+  title           String
+  body            String
+  reviewId        String?
+  createdAt       DateTime      @default(now())
+  readAt          DateTime?
+
+  establishment Establishment @relation(fields: [establishmentId], references: [id], onDelete: Cascade)
+  review        Review?       @relation(fields: [reviewId], references: [id], onDelete: SetNull)
+
+  @@index([establishmentId, createdAt])
+  @@map("alerts")
+}
+
+model LoyaltyMember {
+  id              String         @id
+  establishmentId String
+  contactHash     String
+  channel         LoyaltyChannel
+  points          Int            @default(0)
+  createdAt       DateTime       @default(now())
+  lastEarnedAt    DateTime?
+
+  establishment Establishment @relation(fields: [establishmentId], references: [id], onDelete: Cascade)
+
+  @@unique([establishmentId, contactHash])
+  @@map("loyalty_members")
+}

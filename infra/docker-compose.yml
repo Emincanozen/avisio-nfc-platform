@@ -1,0 +1,33 @@
+# PostgreSQL de développement.
+#
+# Facultatif : sans DATABASE_URL, l'API démarre sur l'adaptateur mémoire avec le
+# jeu de démonstration. Ce fichier sert quand on veut de la persistance réelle.
+#
+#   docker compose -f infra/docker-compose.yml up -d
+#   echo 'DATABASE_URL=postgresql://avisio:avisio@localhost:5432/avisio' >> .env
+#   npm run db:push && npm run seed
+
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: avisio-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: avisio
+      POSTGRES_PASSWORD: avisio
+      POSTGRES_DB: avisio
+      # Collation française : l'ordre alphabétique des établissements et des
+      # thèmes doit être correct avec les accents.
+      LANG: fr_FR.utf8
+    ports:
+      - '5432:5432'
+    volumes:
+      - avisio-db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U avisio -d avisio']
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  avisio-db-data:
