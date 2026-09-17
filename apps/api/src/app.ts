@@ -9,16 +9,27 @@
 import cors from '@fastify/cors';
 import jwt from '@fastify/jwt';
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from 'fastify';
-import type { PlatformId } from '@avisio/core';
+import type { ManagerRole, PlatformId } from '@avisio/core';
 import { env } from './env.js';
 import type { Repository } from './repository/index.js';
 import { createLlmService, type LlmService } from './services/anthropic.js';
 import { createAnalyticsService } from './services/analytics.js';
-import { createGoogleConnector, createSimulatedConnector, type ReviewConnector } from './services/google.js';
+import { createBillingService, type PaymentProvider } from './services/billing.js';
+import {
+  createGoogleConnector,
+  createSimulatedConnector,
+  type ReviewConnector,
+} from './services/google.js';
 import { createIngestService } from './services/ingest.js';
 import { createNotifier, type Notifier } from './services/notify.js';
+import { createPosService } from './services/pos.js';
+import { createPushSender, type PushSender } from './services/push.js';
+import { createReportService } from './services/reports.js';
+import { registerAdminRoutes } from './routes/admin.js';
 import { registerAuthRoutes } from './routes/auth.js';
+import { registerBillingRoutes } from './routes/billing.js';
 import { registerCatalogRoutes } from './routes/catalog.js';
+import { registerIntegrationRoutes } from './routes/integrations.js';
 import { registerManagerRoutes } from './routes/manager.js';
 import { registerPublicRoutes } from './routes/public.js';
 
@@ -26,6 +37,8 @@ export interface AppDeps {
   repo: Repository;
   llm?: LlmService;
   notifier?: Notifier;
+  push?: PushSender;
+  payments?: PaymentProvider;
   connectors?: Map<PlatformId, ReviewConnector>;
 }
 
@@ -33,9 +46,13 @@ export interface AppContext {
   repo: Repository;
   llm: LlmService;
   notifier: Notifier;
+  push: PushSender;
   connectors: Map<PlatformId, ReviewConnector>;
   analytics: ReturnType<typeof createAnalyticsService>;
   ingest: ReturnType<typeof createIngestService>;
+  billing: ReturnType<typeof createBillingService>;
+  reports: ReturnType<typeof createReportService>;
+  pos: ReturnType<typeof createPosService>;
 }
 
 declare module 'fastify' {
@@ -43,19 +60,20 @@ declare module 'fastify' {
     ctx: AppContext;
     /** Vérifie le JWT ; 401 sinon. */
     authenticate: (request: FastifyRequest, reply: FastifyReply) => Promise<void>;
+    /** Vérifie le JWT **et** le rôle admin ; 403 sinon. */
+    requireAdmin: (request: FastifyRequest, reply: FastifyReply) => Promise<void>;
   }
   interface FastifyRequest {
     /** Établissements accessibles par le gérant authentifié. */
     establishmentIds: string[];
+    managerId: string;
+    role: ManagerRole;
   }
 }
 
 export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
   const app = Fastify({
-    logger:
-      env.nodeEnv === 'test'
-        ? false
-        : { level: 'info', transport: undefined },
+    logger: env.nodeEnv === 'test' ? false : { level: 'info', transport: undefined },
     // Les landing pages NFC sont servies derrière un proxy : on fait confiance
     // à X-Forwarded-* pour l'IP et le protocole.
     trustProxy: true,
@@ -67,7 +85,8 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
   };
 
   const llm = deps.llm ?? createLlmService(logger);
-  const notifier = deps.notifier ?? createNotifier(logger);
+  const push = deps.push ?? createPushSender(deps.repo, logger);
+  const notifier = deps.notifier ?? createNotifier({ repo: deps.repo, push, logger });
   const connectors =
     deps.connectors ??
     new Map<PlatformId, ReviewConnector>([
@@ -82,9 +101,30 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
     repo: deps.repo,
     llm,
     notifier,
+    push,
     connectors,
     analytics: createAnalyticsService(deps.repo),
     ingest: createIngestService({ repo: deps.repo, connectors, llm, notifier, logger }),
+    billing: createBillingService({
+      repo: deps.repo,
+      notifier,
+      logger,
+      ...(deps.payments ? { payments: deps.payments } : {}),
+    }),
+    reports: createReportService({ repo: deps.repo, notifier, logger }),
+    pos: createPosService({
+      repo: deps.repo,
+      logger,
+      // L'invitation sort par le même canal que les autres messages
+      // transactionnels : pas de second fournisseur à administrer.
+      sendInvitation: async (channel, contact, message) => {
+        if (channel === 'sms') {
+          logger.info(`[SMS simulé] à ${contact} — ${message.body}`);
+          return;
+        }
+        logger.info(`[e-mail invitation] à ${contact} — ${message.subject ?? ''}`);
+      },
+    }),
   };
   app.decorate('ctx', ctx);
 
@@ -102,8 +142,32 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
 
   app.decorate('authenticate', async (request: FastifyRequest, reply: FastifyReply) => {
     try {
-      const claims = await request.jwtVerify<{ sub: string; establishmentIds: string[] }>();
+      const claims = await request.jwtVerify<{
+        sub: string;
+        establishmentIds: string[];
+        role?: ManagerRole;
+      }>();
       request.establishmentIds = claims.establishmentIds ?? [];
+      request.managerId = claims.sub;
+      request.role = claims.role ?? 'owner';
+    } catch {
+      await reply.code(401).send({ error: 'Authentification requise.' });
+    }
+  });
+
+  app.decorate('requireAdmin', async (request: FastifyRequest, reply: FastifyReply) => {
+    try {
+      const claims = await request.jwtVerify<{
+        sub: string;
+        establishmentIds: string[];
+        role?: ManagerRole;
+      }>();
+      request.establishmentIds = claims.establishmentIds ?? [];
+      request.managerId = claims.sub;
+      request.role = claims.role ?? 'owner';
+      if (request.role !== 'admin') {
+        await reply.code(403).send({ error: 'Réservé aux comptes administrateurs.' });
+      }
     } catch {
       await reply.code(401).send({ error: 'Authentification requise.' });
     }
@@ -123,12 +187,19 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
   await registerAuthRoutes(app);
   await registerCatalogRoutes(app);
   await registerManagerRoutes(app);
+  await registerBillingRoutes(app);
+  await registerIntegrationRoutes(app);
+  await registerAdminRoutes(app);
 
   return app;
 }
 
-/** Garde d'accès multi-locataire, appliquée dans chaque route protégée. */
+/**
+ * Garde d'accès multi-locataire, appliquée dans chaque route protégée.
+ * Un compte admin traverse la garde : c'est le propre du back-office.
+ */
 export function assertAccess(request: FastifyRequest, establishmentId: string): void {
+  if (request.role === 'admin') return;
   if (!request.establishmentIds?.includes(establishmentId)) {
     const error = new Error('Établissement non accessible avec ce compte.') as Error & {
       statusCode: number;

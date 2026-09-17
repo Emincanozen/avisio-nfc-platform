@@ -8,6 +8,9 @@ const TABS = [
   { href: '', label: 'Vue d’ensemble' },
   { href: '/avis', label: 'Avis & réponses' },
   { href: '/plaquettes', label: 'Plaquettes NFC' },
+  { href: '/caisse', label: 'Caisse' },
+  { href: '/factures', label: 'Abonnement & factures' },
+  { href: '/notifications', label: 'Notifications' },
 ];
 
 export default function EstablishmentLayout({

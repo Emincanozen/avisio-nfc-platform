@@ -27,6 +27,7 @@ export async function registerAuthRoutes(app: FastifyInstance): Promise<void> {
     const token = app.jwt.sign({
       sub: manager.id,
       email: manager.email,
+      role: manager.role,
       establishmentIds: manager.establishmentIds,
     });
 
@@ -36,6 +37,7 @@ export async function registerAuthRoutes(app: FastifyInstance): Promise<void> {
         id: manager.id,
         email: manager.email,
         name: manager.name,
+        role: manager.role,
         establishmentIds: manager.establishmentIds,
       },
     };
@@ -47,7 +49,12 @@ export async function registerAuthRoutes(app: FastifyInstance): Promise<void> {
     if (!manager) throw httpError(401, 'Session expirée.');
     const establishments = await repo.establishments.listByIds(manager.establishmentIds);
     return {
-      manager: { id: manager.id, email: manager.email, name: manager.name },
+      manager: {
+        id: manager.id,
+        email: manager.email,
+        name: manager.name,
+        role: manager.role,
+      },
       establishments,
     };
   });

@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 192 192" role="img" aria-label="Avisio">
+  <rect width="192" height="192" rx="42" fill="#141413"/>
+  <path d="M96 42 L128 138 H112 L96 92 L80 138 H64 Z" fill="#c25c3a"/>
+  <circle cx="96" cy="150" r="8" fill="#faf9f5"/>
+</svg>

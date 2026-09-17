@@ -6,19 +6,30 @@
  * Les données sont perdues au redémarrage — c'est assumé et annoncé au boot.
  */
 
-import type {
-  Alert,
-  Establishment,
-  LoyaltyMember,
-  Manager,
-  NfcTag,
-  PlatformId,
-  PlatformLink,
-  Review,
-  ScanEvent,
+import {
+  formatInvoiceNumber,
+  type Alert,
+  type Establishment,
+  type Invoice,
+  type LoyaltyMember,
+  type Manager,
+  type NfcTag,
+  type NotificationPreferences,
+  type PlatformId,
+  type PlatformLink,
+  type Review,
+  type ScanEvent,
+  type Subscription,
 } from '@avisio/core';
 import { buildDemoDataset } from '../demo-data.js';
-import type { Repository, ReviewQuery } from './types.js';
+import type {
+  PendingPushRecord,
+  PosCredentialRecord,
+  PosTicketRecord,
+  PushSubscriptionRecord,
+  Repository,
+  ReviewQuery,
+} from './types.js';
 
 export function createMemoryRepository(options: { seed?: boolean } = {}): Repository {
   const managers = new Map<string, Manager>();
@@ -31,6 +42,20 @@ export function createMemoryRepository(options: { seed?: boolean } = {}): Reposi
   const externalIndex = new Set<string>(); // clé: estId:platform:externalId
   const alerts: Alert[] = [];
   const loyalty = new Map<string, LoyaltyMember>();
+  const subscriptions = new Map<string, Subscription>();
+  const invoices = new Map<string, Invoice>();
+  const invoiceCounters = new Map<number, number>();
+  const pushSubscriptions = new Map<string, PushSubscriptionRecord>(); // clé: endpoint
+  const pendingPushes = new Map<string, PendingPushRecord>();
+  const preferences = new Map<string, NotificationPreferences>();
+  const posTickets = new Map<string, PosTicketRecord>(); // clé: estId:externalId
+  const posCredentials = new Map<string, PosCredentialRecord>();
+
+  // Les identifiants générés à l'exécution doivent rester hors de portée de
+  // ceux du jeu de démonstration (`inv_1`, `inv_2`…), sinon une facture créée
+  // pendant la démo écrase silencieusement une facture amorcée.
+  let sequence = 10_000;
+  const nextId = (prefix: string): string => `${prefix}_${(sequence += 1)}`;
 
   if (options.seed !== false) {
     const demo = buildDemoDataset();
@@ -48,6 +73,16 @@ export function createMemoryRepository(options: { seed?: boolean } = {}): Reposi
     }
     alerts.push(...demo.alerts);
     for (const m of demo.loyalty) loyalty.set(m.id, m);
+    for (const s of demo.subscriptions) subscriptions.set(s.id, s);
+    for (const i of demo.invoices) {
+      invoices.set(i.id, i);
+      const year = new Date(i.issuedAt).getUTCFullYear();
+      const parsed = Number(i.number.slice(-6));
+      invoiceCounters.set(year, Math.max(invoiceCounters.get(year) ?? 0, parsed));
+    }
+    for (const p of demo.preferences) preferences.set(p.establishmentId, p);
+    for (const t of demo.posTickets) posTickets.set(ticketKey(t.establishmentId, t.externalId), t);
+    for (const c of demo.posCredentials) posCredentials.set(c.establishmentId, c);
   }
 
   return {
@@ -66,9 +101,19 @@ export function createMemoryRepository(options: { seed?: boolean } = {}): Reposi
           m.establishmentIds.includes(establishmentId),
         );
       },
+      async listAll() {
+        return [...managers.values()];
+      },
       async create(manager) {
         managers.set(manager.id, manager);
         return manager;
+      },
+      async update(id, patch) {
+        const current = managers.get(id);
+        if (!current) throw new Error(`Gérant inconnu : ${id}`);
+        const next = { ...current, ...patch, id };
+        managers.set(id, next);
+        return next;
       },
     },
 
@@ -235,6 +280,160 @@ export function createMemoryRepository(options: { seed?: boolean } = {}): Reposi
       },
     },
 
+    subscriptions: {
+      async create(subscription) {
+        subscriptions.set(subscription.id, subscription);
+        return subscription;
+      },
+      async findByEstablishment(establishmentId) {
+        return (
+          [...subscriptions.values()].find((s) => s.establishmentId === establishmentId) ?? null
+        );
+      },
+      async findById(id) {
+        return subscriptions.get(id) ?? null;
+      },
+      async listAll() {
+        return [...subscriptions.values()];
+      },
+      async listDue(now) {
+        const at = new Date(now).getTime();
+        return [...subscriptions.values()].filter(
+          (s) =>
+            (s.status === 'active' || s.status === 'past_due' || s.status === 'trialing') &&
+            new Date(s.currentPeriodEnd).getTime() <= at,
+        );
+      },
+      async update(id, patch) {
+        const current = subscriptions.get(id);
+        if (!current) throw new Error(`Abonnement inconnu : ${id}`);
+        const next = { ...current, ...patch, id };
+        subscriptions.set(id, next);
+        return next;
+      },
+    },
+
+    invoices: {
+      async create(invoice, year) {
+        // Séquence sans trou : le compteur est incrémenté et consommé ici même.
+        const next = (invoiceCounters.get(year) ?? 0) + 1;
+        invoiceCounters.set(year, next);
+        const created: Invoice = {
+          ...invoice,
+          id: nextId('inv'),
+          number: formatInvoiceNumber(year, next),
+        };
+        invoices.set(created.id, created);
+        return created;
+      },
+      async findById(id) {
+        return invoices.get(id) ?? null;
+      },
+      async listByEstablishment(establishmentId) {
+        return [...invoices.values()]
+          .filter((i) => i.establishmentId === establishmentId)
+          .sort((a, b) => b.issuedAt.localeCompare(a.issuedAt));
+      },
+      async listAll() {
+        return [...invoices.values()];
+      },
+      async listOverdue(now) {
+        const at = new Date(now).getTime();
+        return [...invoices.values()].filter(
+          (i) => i.status === 'open' && new Date(i.dueAt).getTime() < at,
+        );
+      },
+      async update(id, patch) {
+        const current = invoices.get(id);
+        if (!current) throw new Error(`Facture inconnue : ${id}`);
+        const next = { ...current, ...patch, id };
+        invoices.set(id, next);
+        return next;
+      },
+    },
+
+    push: {
+      async subscribe(record) {
+        pushSubscriptions.set(record.endpoint, record);
+        return record;
+      },
+      async listByManager(managerId) {
+        return [...pushSubscriptions.values()].filter((s) => s.managerId === managerId);
+      },
+      async unsubscribe(endpoint) {
+        pushSubscriptions.delete(endpoint);
+      },
+      async queue(record) {
+        pendingPushes.set(record.id, record);
+        return record;
+      },
+      async listQueued(now) {
+        const at = new Date(now).getTime();
+        return [...pendingPushes.values()].filter(
+          (p) => !p.sentAt && new Date(p.sendAt).getTime() <= at,
+        );
+      },
+      async markSent(id, at) {
+        const current = pendingPushes.get(id);
+        if (current) pendingPushes.set(id, { ...current, sentAt: at });
+      },
+    },
+
+    notificationPreferences: {
+      async get(establishmentId) {
+        return preferences.get(establishmentId) ?? null;
+      },
+      async upsert(value) {
+        preferences.set(value.establishmentId, value);
+        return value;
+      },
+    },
+
+    pos: {
+      async findTicket(establishmentId, externalId) {
+        return posTickets.get(ticketKey(establishmentId, externalId)) ?? null;
+      },
+      async createTicket(ticket) {
+        posTickets.set(ticketKey(ticket.establishmentId, ticket.externalId), ticket);
+        return ticket;
+      },
+      async listTickets(establishmentId, since) {
+        const floor = since ? new Date(since).getTime() : 0;
+        return [...posTickets.values()].filter(
+          (t) =>
+            t.establishmentId === establishmentId && new Date(t.closedAt).getTime() >= floor,
+        );
+      },
+      async markInvited(id, at) {
+        for (const [key, ticket] of posTickets) {
+          if (ticket.id === id) posTickets.set(key, { ...ticket, invitedAt: at });
+        }
+      },
+      async lastInvitedAt(establishmentId, contactHash) {
+        return [...posTickets.values()]
+          .filter(
+            (t) =>
+              t.establishmentId === establishmentId &&
+              t.contactHash === contactHash &&
+              Boolean(t.invitedAt),
+          )
+          .map((t) => t.invitedAt!)
+          .sort()
+          .pop();
+      },
+      async getCredential(establishmentId) {
+        return posCredentials.get(establishmentId) ?? null;
+      },
+      async upsertCredential(credential) {
+        posCredentials.set(credential.establishmentId, credential);
+        return credential;
+      },
+      async touchCredential(establishmentId, at) {
+        const current = posCredentials.get(establishmentId);
+        if (current) posCredentials.set(establishmentId, { ...current, lastUsedAt: at });
+      },
+    },
+
     async close() {
       // rien à fermer
     },
@@ -257,3 +456,6 @@ const linkKey = (establishmentId: string, platform: PlatformId): string =>
 
 const extKey = (review: Review): string =>
   `${review.establishmentId}:${review.platform}:${review.externalId}`;
+
+const ticketKey = (establishmentId: string, externalId: string): string =>
+  `${establishmentId}:${externalId}`;

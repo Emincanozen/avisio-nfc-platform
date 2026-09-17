@@ -1,5 +1,6 @@
 export * from './types.js';
 export * from './pricing.js';
+export * from './billing.js';
 export * from './compliance.js';
 export * from './routing.js';
 export * from './reviews.js';
@@ -7,5 +8,8 @@ export * from './nlp.js';
 export * from './trends.js';
 export * from './benchmark.js';
 export * from './loyalty.js';
+export * from './notifications.js';
+export * from './report.js';
+export * from './pos.js';
 export * from './i18n.js';
 export * from './ids.js';

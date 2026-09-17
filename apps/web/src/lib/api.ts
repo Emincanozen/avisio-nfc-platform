@@ -56,7 +56,10 @@ export async function api<T>(
   const response = await fetch(`${API_URL}${path}`, {
     ...rest,
     headers: {
-      'content-type': 'application/json',
+      // Le content-type n'est posé que s'il y a un corps : Fastify refuse une
+      // requête annoncée en JSON dont le corps est vide, ce qui est le cas des
+      // POST de déclenchement (`/admin/ops/...`, `/push/test`).
+      ...(rest.body == null ? {} : { 'content-type': 'application/json' }),
       ...(token ? { authorization: `Bearer ${token}` } : {}),
       ...(headers ?? {}),
     },

@@ -261,15 +261,20 @@ Scan NFC → Landing page → Moteur de routage → Plateforme d'avis
 
 | Périmètre | État |
 |---|---|
-| Domaine métier (`@avisio/core`) | 89 tests, couverture des règles de gestion et de conformité |
-| API (auth, routage, avis, analytics, fidélité, plaquettes) | 35 tests d'intégration |
+| Domaine métier (`@avisio/core`) | 150 tests, couverture des règles de gestion et de conformité |
+| API (auth, routage, avis, analytics, fidélité, plaquettes, facturation, caisse, back-office) | 80 tests d'intégration |
 | Landing NFC multilingue | fonctionnelle |
-| Espace gérant (3 écrans) | fonctionnel |
+| Espace gérant (6 écrans) | fonctionnel |
+| Back-office d'exploitation | fonctionnel — parc, factures, onboarding, comptes, traitements |
 | Site vitrine + simulateur de devis | fonctionnel |
+| Facturation | fonctionnelle — numérotation légale, PDF, prorata, relances, suspension |
+| Notifications push (PWA) | fonctionnelles — préférences par événement, heures calmes |
+| Rapport mensuel HTML + PDF | fonctionnel, envoi automatique le 1er du mois |
+| Intégration caisse (webhook signé) | fonctionnelle |
 | Connecteur Google Business Profile | écrit, en attente de l'accès partenaire |
 | Connecteurs TripAdvisor / Facebook / Yelp / TheFork | simulés, à brancher |
-| Paiement et facturation | **non développé** — voir §9 |
-| Application mobile / push | **non développé** — les alertes passent par e-mail |
+| Encaissement automatique (mandat SEPA) | **non développé** — règlement constaté manuellement, voir §10 |
+| Envoi de SMS | **non développé** — les invitations partent par e-mail |
 
 ---
 
@@ -383,7 +388,7 @@ quinze minutes, et l'autorisation de mesurer. Ce qu'il faut en sortir :
 | **Google fait évoluer ses règles sur la sollicitation d'avis** | Moyenne | Position déjà conservatrice : aucun tri, aucune contrepartie conditionnée. C'est le concurrent qui pratique le gating qui tombe en premier. |
 | **Attrition supérieure à l'hypothèse** | Élevée | Engagement 12 mois incité par la gratuité de la mise en service ; le dashboard et les alertes créent un usage hebdomadaire, ce qui est le meilleur anti-churn. À mesurer sur les pilotes avant d'accélérer le recrutement commercial. |
 | **Productivité commerciale en dessous du plan** | Élevée | Le recrutement du 2e et du 3e commercial est conditionné aux chiffres du précédent, pas au calendrier. |
-| **Facturation non développée** | Certaine | Chantier de la phase 2 : mandat SEPA via GoCardless ou Stripe Billing. Tant que le parc est sous 20 clients, la facturation manuelle tient. |
+| **Encaissement non automatisé** | Moyenne | La facturation est développée ; seul le prélèvement manque. Mandat SEPA via GoCardless ou Stripe Billing à brancher sur le port `PaymentProvider`. Sous 20 clients, le règlement constaté à la main tient. |
 | **Dépendance à un fournisseur de LLM** | Faible | Le moteur heuristique local prend le relais automatiquement ; la qualité baisse, le service ne tombe pas. |
 | **Concurrence d'un acteur national** | Moyenne | La barrière est le terrain, pas la technique. Un an d'avance sur un maillage local vaut plus qu'une fonctionnalité. |
 
@@ -393,19 +398,24 @@ quinze minutes, et l'autorisation de mesurer. Ce qu'il faut en sortir :
 
 Par ordre de priorité, et avec une estimation honnête :
 
-1. **Facturation et encaissement** (2-3 semaines) — mandat SEPA, cycle de
-   facturation, relances. Bloquant au-delà de 20 clients.
-2. **Accès API Google Business Profile** (administratif, 4-8 semaines de délai) —
-   à lancer immédiatement, c'est le chemin critique.
-3. **Onboarding autonome** (1-2 semaines) — aujourd'hui un établissement est créé
-   en base ; il faut un parcours de création guidé pour que le commercial le
-   fasse devant le client.
-4. **Notifications push** (1 semaine) — PWA installable plutôt qu'application
-   native, suffisant pour l'usage visé.
-5. **Export PDF du rapport mensuel** (3-5 jours) — argument de rétention, le
-   gérant reçoit une preuve de valeur tous les mois.
-6. **Accès partenaires TripAdvisor / Facebook / Yelp** (administratif) — les
+1. **Accès API Google Business Profile** (administratif, 4-8 semaines de délai) —
+   à lancer immédiatement, c'est le chemin critique. Le connecteur est écrit et
+   testé ; d'ici là, le connecteur simulé produit des avis à la cadence réelle.
+2. **Encaissement automatique** (1-2 semaines) — la facturation est complète
+   (émission, numérotation légale, PDF, prorata, relances, suspension), mais le
+   règlement est constaté à la main. Brancher GoCardless pour le mandat SEPA ou
+   Stripe Billing revient à écrire un second adaptateur `PaymentProvider` :
+   aucune autre partie du code ne change. Tenable manuellement sous 20 clients.
+3. **Envoi de SMS** (3-5 jours) — les invitations de caisse par SMS sont
+   journalisées faute d'opérateur (Brevo, OVH SMS). Le canal e-mail fonctionne.
+4. **Accès partenaires TripAdvisor / Facebook / Yelp** (administratif) — les
    connecteurs sont écrits, il manque les autorisations.
+5. **Résumé hebdomadaire** (2-3 jours) — le canal est en place dans les
+   préférences, le contenu reste à composer.
+
+Le reste du périmètre annoncé aux trois offres est développé et testé :
+notifications push, rapport mensuel, intégration caisse, facturation,
+onboarding autonome et back-office d'exploitation.
 
 ---
 

@@ -140,11 +140,18 @@ export interface LoyaltyMember {
   lastEarnedAt?: string;
 }
 
+/**
+ * `owner` : gérant, accès limité à ses propres établissements.
+ * `admin` : exploitant d'Avisio, accès au back-office et à tout le parc.
+ */
+export type ManagerRole = 'owner' | 'admin';
+
 export interface Manager {
   id: string;
   email: string;
   passwordHash: string;
   name: string;
+  role: ManagerRole;
   establishmentIds: string[];
   createdAt: string;
 }

@@ -17,9 +17,13 @@
     "@fastify/jwt": "^9.0.2",
     "@prisma/client": "^6.2.1",
     "fastify": "^5.2.1",
+    "pdfkit": "^0.20.2",
+    "web-push": "^3.6.7",
     "zod": "^3.24.1"
   },
   "devDependencies": {
+    "@types/pdfkit": "^0.17.6",
+    "@types/web-push": "^3.6.4",
     "tsx": "^4.19.2",
     "typescript": "^5.7.3"
   }

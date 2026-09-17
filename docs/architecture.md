@@ -29,6 +29,7 @@ aux autres quand le volume l'exigera.
 ```
 packages/core/          Domaine pur, aucune dépendance externe
   pricing.ts            Catalogue, devis, droits par offre
+  billing.ts            Abonnements, factures, numérotation légale, recouvrement
   routing.ts            Moteur de routage multi-plateformes
   compliance.ts         Garde-fous réglementaires exécutables
   reviews.ts            Métriques, SLA de réponse, cycle de vie d'un avis
@@ -36,20 +37,28 @@ packages/core/          Domaine pur, aucune dépendance externe
   trends.ts             Détection de tendance thématique
   benchmark.ts          Comparaison sectorielle anonymisée (k-anonymat)
   loyalty.ts            Barème de points, carence, paliers
+  notifications.ts      Préférences, canaux, heures calmes, regroupement
+  report.ts             Rapport mensuel : structure, constats, rendu HTML
+  pos.ts                Intégration caisse : décision d'invitation, carence
   i18n.ts               Négociation de langue et messages de la landing
   ids.ts                Slugs de plaquette, contrôle de capacité NTAG213
 
 apps/api/               API REST Fastify
   repository/           Port de persistance + adaptateurs mémoire et Prisma
-  services/             Connecteurs Google, Claude, e-mail, ingestion, analytics
-  routes/               public (NFC, fidélité, widget), auth, catalogue, gérant
+  services/             Google, Claude, notifications, push, ingestion,
+                        analytics, facturation, rapports, caisse, PDF
+  routes/               public (NFC, fidélité, widget), auth, catalogue,
+                        gérant, facturation, intégrations, back-office admin
   prisma/schema.prisma  Modèle de données PostgreSQL
 
 apps/web/               Next.js
   app/s/[slug]/         Landing NFC, rendue côté serveur
-  app/dashboard/        Espace gérant
+  app/dashboard/        Espace gérant (6 onglets)
+  app/admin/            Back-office d'exploitation
   app/widget/[id]/      Widget avis embarquable
   app/page.tsx          Site vitrine + simulateur de devis
+  public/sw.js          Service worker : réception des notifications push
+  public/manifest.json  PWA installable sur l'écran d'accueil
 ```
 
 ### Pourquoi un paquet `core` séparé
@@ -60,7 +69,7 @@ Trois raisons concrètes :
    appellent la même fonction `quote()`. Le prix annoncé en rendez-vous est le
    prix facturé, par construction.
 2. **Les règles de conformité sont testables isolément**, sans base ni réseau.
-   Les 89 tests du domaine tournent en moins d'une seconde.
+   Les 150 tests du domaine tournent en moins d'une seconde.
 3. **Le front réutilise le domaine.** Le simulateur tourne entièrement dans le
    navigateur, sans appel API.
 
@@ -96,11 +105,11 @@ dépend pas d'une base accessible.
 
 ## 4. Modèle de données
 
-Huit tables, définies dans `apps/api/prisma/schema.prisma`.
+Seize tables, définies dans `apps/api/prisma/schema.prisma`.
 
 | Table | Rôle | Points d'attention |
 |---|---|---|
-| `managers` | Comptes de l'espace gérant | Relation N-N avec les établissements (chaînes) |
+| `managers` | Comptes | Rôle `owner` ou `admin` ; relation N-N avec les établissements (chaînes) |
 | `establishments` | Établissements | Index `(secteur, code postal)` et `(NAF, code postal)` pour le benchmark |
 | `platform_links` | Une ligne par plateforme activée | Unicité `(établissement, plateforme)` ; porte les compteurs du routage |
 | `nfc_tags` | Plaquettes | `slug` unique — une plaquette imprimée qui pointe ailleurs est irrattrapable |
@@ -108,6 +117,14 @@ Huit tables, définies dans `apps/api/prisma/schema.prisma`.
 | `reviews` | Avis ingérés | **Unicité `(établissement, plateforme, id externe)` : c'est elle qui rend l'ingestion idempotente** |
 | `alerts` | Alertes gérant | Déduplication des alertes de tendance par titre et fenêtre |
 | `loyalty_members` | Membres fidélité | **Aucune coordonnée en clair** : seul un condensat est stocké |
+| `subscriptions` | Un abonnement par établissement | Index `(statut, fin de période)` : c'est la requête du cycle de facturation |
+| `invoices` | Factures émises | Numéro unique ; une facture n'est jamais supprimée, seulement annulée |
+| `invoice_counters` | Compteur par année | **Incrémenté dans la même transaction que la facture** : c'est ce qui garantit une séquence sans trou |
+| `push_subscriptions` | Appareils abonnés au push | Clé sur l'`endpoint` ; retirée automatiquement sur 404/410 |
+| `pending_pushes` | Push différés par les heures calmes | Portés par la base, pas par un timer : un redémarrage ne perd pas l'alerte |
+| `notification_preferences` | Canaux et heures calmes | Une ligne par établissement |
+| `pos_tickets` | Tickets de caisse | Unicité `(établissement, id externe)` : une caisse qui rejoue ne duplique pas |
+| `pos_credentials` | Clé de signature d'une caisse | **Condensat seulement** — la clé en clair n'est montrée qu'à la création |
 
 Le résultat du pipeline NLP est dénormalisé dans `reviews` (sentiment, thèmes,
 mots-clés) plutôt que dans une table jointe : le dashboard le lit à chaque
@@ -215,6 +232,8 @@ profondeur de raisonnement n'y apporte rien), la rédaction de réponse à effor
 | `ANTHROPIC_API_KEY` | Moteur heuristique local |
 | Identifiants Google | Connecteur simulé (avis générés, cadences réelles) |
 | `RESEND_API_KEY` | E-mails journalisés en console avec leur contenu |
+| Clés VAPID | Push journalisés en console |
+| Prestataire de paiement | Facture émise et envoyée, règlement constaté au back-office |
 
 Aucune de ces absences n'empêche l'application de démarrer. C'est une décision
 de conception : le produit se démontre sur le terrain, dans des conditions
@@ -224,11 +243,34 @@ réseau incertaines.
 
 Portées par le processus API tant qu'il n'y a qu'une instance :
 
-- ingestion toutes les `INGEST_INTERVAL_MINUTES` (20 par défaut) ;
-- détection de tendance une fois par jour.
+| Tâche | Cadence | Rôle |
+|---|---|---|
+| Ingestion | `INGEST_INTERVAL_MINUTES` (20) | Avis, analyse, alertes |
+| Tendances | 24 h | Thèmes qui montent |
+| Facturation + relances | `BILLING_INTERVAL_HOURS` (6) | Périodes échues, recouvrement |
+| Push différés | 5 min | File retenue par les heures calmes |
+| Rapports mensuels | contrôle horaire, déclenche le 1er | Envoi aux offres éligibles |
 
-Les deux timers sont `unref()` pour ne pas maintenir le processus en vie seuls,
+Tous les timers sont `unref()` pour ne pas maintenir le processus en vie seuls,
 et l'arrêt sur `SIGINT`/`SIGTERM` ferme proprement le serveur et la base.
+
+Le rapport mensuel est vérifié toutes les heures plutôt que programmé au
+prochain 1er : un processus redémarré au mauvais moment sauterait sinon le mois.
+
+### Idempotence de la facturation
+
+La période de l'abonnement avance dans la même opération que l'émission de la
+facture. Un cycle rejoué — redémarrage, double instance, déclenchement manuel —
+ne trouve donc plus de période échue et ne facture pas deux fois. Le numéro,
+lui, est réservé par un compteur transactionnel : la séquence légale n'a ni trou
+ni doublon, même sous appels concurrents.
+
+### Sécurité de l'intégration caisse
+
+Le webhook est public mais signé : HMAC-SHA256 de `<timestamp>.<corps brut>`,
+fenêtre de validité de cinq minutes contre le rejeu. Le corps **brut** est
+conservé avant l'analyse JSON — resérialiser un objet déjà analysé changerait
+l'ordre des clés et les espaces, donc la signature.
 
 ## 10. Passage à l'échelle
 

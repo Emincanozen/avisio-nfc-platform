@@ -16,6 +16,7 @@ const PLAN_LABELS: Record<string, string> = {
 export default function DashboardHome() {
   const router = useRouter();
   const [establishments, setEstablishments] = useState<Establishment[] | null>(null);
+  const [isAdmin, setIsAdmin] = useState(false);
   const [error, setError] = useState('');
 
   useEffect(() => {
@@ -29,6 +30,12 @@ export default function DashboardHome() {
         }
         setError(err instanceof Error ? err.message : 'Chargement impossible.');
       });
+
+    // Le back-office n'est proposé qu'aux comptes qui y ont droit ; l'API
+    // refuse de toute façon les autres.
+    api<{ manager: { role: string } }>('/auth/me')
+      .then((result) => setIsAdmin(result.manager.role === 'admin'))
+      .catch(() => setIsAdmin(false));
   }, [router]);
 
   return (
@@ -38,16 +45,23 @@ export default function DashboardHome() {
           <div className="eyebrow">Avisio</div>
           <h1 style={{ fontSize: 26 }}>Vos établissements</h1>
         </div>
-        <button
-          type="button"
-          className="btn btn-ghost"
-          onClick={() => {
-            clearToken();
-            router.replace('/login');
-          }}
-        >
-          Se déconnecter
-        </button>
+        <div className="row">
+          {isAdmin && (
+            <Link href="/admin" className="btn btn-dark">
+              Back-office
+            </Link>
+          )}
+          <button
+            type="button"
+            className="btn btn-ghost"
+            onClick={() => {
+              clearToken();
+              router.replace('/login');
+            }}
+          >
+            Se déconnecter
+          </button>
+        </div>
       </div>
 
       {error && <Empty>{error}</Empty>}

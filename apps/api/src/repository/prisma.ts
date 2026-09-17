@@ -8,18 +8,29 @@
  * jamais vu la base — ce qui est exactement le cas de l'environnement de démo.
  */
 
+import { formatInvoiceNumber } from '@avisio/core';
 import type {
   Alert,
   Establishment,
+  Invoice,
   LoyaltyMember,
   Manager,
   NfcTag,
+  NotificationPreferences,
   PlatformLink,
   Review,
   ScanEvent,
+  Subscription,
   ThemeId,
 } from '@avisio/core';
-import type { Repository, ReviewQuery } from './types.js';
+import type {
+  PendingPushRecord,
+  PosCredentialRecord,
+  PosTicketRecord,
+  PushSubscriptionRecord,
+  Repository,
+  ReviewQuery,
+} from './types.js';
 
 type Row = Record<string, unknown>;
 
@@ -30,6 +41,8 @@ interface Delegate {
   create(args: Row): Promise<Row>;
   update(args: Row): Promise<Row>;
   upsert(args: Row): Promise<Row>;
+  delete(args: Row): Promise<Row>;
+  deleteMany(args?: Row): Promise<{ count: number }>;
   count(args?: Row): Promise<number>;
 }
 
@@ -42,6 +55,16 @@ interface PrismaLike {
   review: Delegate;
   alert: Delegate;
   loyaltyMember: Delegate;
+  subscription: Delegate;
+  invoice: Delegate;
+  invoiceCounter: Delegate;
+  pushSubscription: Delegate;
+  notificationPreference: Delegate;
+  pendingPush: Delegate;
+  posTicket: Delegate;
+  posCredential: Delegate;
+  /** Réservation atomique du numéro de facture : séquence sans trou. */
+  $transaction<T>(fn: (tx: PrismaLike) => Promise<T>): Promise<T>;
   $disconnect(): Promise<void>;
 }
 
@@ -76,6 +99,28 @@ export async function createPrismaRepository(): Promise<Repository> {
         });
         return rows.map(toManager);
       },
+      async listAll() {
+        const rows = await db.manager.findMany({
+          include: { establishments: { select: { id: true } } },
+        });
+        return rows.map(toManager);
+      },
+      async update(id, patch) {
+        const row = await db.manager.update({
+          where: { id },
+          data: stripUndefined({
+            name: patch.name,
+            email: patch.email?.toLowerCase(),
+            passwordHash: patch.passwordHash,
+            role: patch.role,
+            ...(patch.establishmentIds
+              ? { establishments: { set: patch.establishmentIds.map((eid) => ({ id: eid })) } }
+              : {}),
+          }),
+          include: { establishments: { select: { id: true } } },
+        });
+        return toManager(row);
+      },
       async create(manager) {
         const row = await db.manager.create({
           data: {
@@ -83,6 +128,7 @@ export async function createPrismaRepository(): Promise<Repository> {
             email: manager.email.toLowerCase(),
             passwordHash: manager.passwordHash,
             name: manager.name,
+            role: manager.role,
             createdAt: new Date(manager.createdAt),
             establishments: { connect: manager.establishmentIds.map((id) => ({ id })) },
           },
@@ -377,6 +423,246 @@ export async function createPrismaRepository(): Promise<Repository> {
       },
     },
 
+    subscriptions: {
+      async create(subscription) {
+        const row = await db.subscription.create({ data: fromSubscription(subscription) });
+        return toSubscription(row);
+      },
+      async findByEstablishment(establishmentId) {
+        const row = await db.subscription.findUnique({ where: { establishmentId } });
+        return row ? toSubscription(row) : null;
+      },
+      async findById(id) {
+        const row = await db.subscription.findUnique({ where: { id } });
+        return row ? toSubscription(row) : null;
+      },
+      async listAll() {
+        const rows = await db.subscription.findMany({});
+        return rows.map(toSubscription);
+      },
+      async listDue(now) {
+        const rows = await db.subscription.findMany({
+          where: {
+            status: { in: ['active', 'past_due', 'trialing'] },
+            currentPeriodEnd: { lte: new Date(now) },
+          },
+        });
+        return rows.map(toSubscription);
+      },
+      async update(id, patch) {
+        const row = await db.subscription.update({
+          where: { id },
+          data: stripUndefined({
+            plan: patch.plan,
+            addons: patch.addons,
+            extraPlatforms: patch.extraPlatforms,
+            tags: patch.tags,
+            committed12Months: patch.committed12Months,
+            status: patch.status,
+            currentPeriodStart: patch.currentPeriodStart
+              ? new Date(patch.currentPeriodStart)
+              : undefined,
+            currentPeriodEnd: patch.currentPeriodEnd ? new Date(patch.currentPeriodEnd) : undefined,
+            cancelAt: patch.cancelAt ? new Date(patch.cancelAt) : undefined,
+            canceledAt: patch.canceledAt ? new Date(patch.canceledAt) : undefined,
+          }),
+        });
+        return toSubscription(row);
+      },
+    },
+
+    invoices: {
+      /**
+       * Le numéro est réservé dans la même transaction que l'insertion : deux
+       * facturations concurrentes ne peuvent pas produire de trou ni de
+       * doublon dans la séquence légale.
+       */
+      async create(invoice, year) {
+        return db.$transaction(async (tx) => {
+          const counter = await tx.invoiceCounter.upsert({
+            where: { year },
+            create: { year, sequence: 1 },
+            update: { sequence: { increment: 1 } },
+          });
+          const sequence = Number(counter.sequence);
+          const row = await tx.invoice.create({
+            data: {
+              ...fromInvoice(invoice),
+              id: `inv_${year}_${sequence}`,
+              number: formatInvoiceNumber(year, sequence),
+            },
+          });
+          return toInvoice(row);
+        });
+      },
+      async findById(id) {
+        const row = await db.invoice.findUnique({ where: { id } });
+        return row ? toInvoice(row) : null;
+      },
+      async listByEstablishment(establishmentId) {
+        const rows = await db.invoice.findMany({
+          where: { establishmentId },
+          orderBy: { issuedAt: 'desc' },
+        });
+        return rows.map(toInvoice);
+      },
+      async listAll() {
+        const rows = await db.invoice.findMany({});
+        return rows.map(toInvoice);
+      },
+      async listOverdue(now) {
+        const rows = await db.invoice.findMany({
+          where: { status: 'open', dueAt: { lt: new Date(now) } },
+        });
+        return rows.map(toInvoice);
+      },
+      async update(id, patch) {
+        const row = await db.invoice.update({
+          where: { id },
+          data: stripUndefined({
+            status: patch.status,
+            paidAt: patch.paidAt ? new Date(patch.paidAt) : undefined,
+            paymentReference: patch.paymentReference,
+            remindersSent: patch.remindersSent,
+          }),
+        });
+        return toInvoice(row);
+      },
+    },
+
+    push: {
+      async subscribe(record) {
+        const data = {
+          managerId: record.managerId,
+          p256dh: record.p256dh,
+          auth: record.auth,
+          userAgent: record.userAgent ?? null,
+        };
+        const row = await db.pushSubscription.upsert({
+          where: { endpoint: record.endpoint },
+          create: { id: record.id, endpoint: record.endpoint, ...data },
+          update: data,
+        });
+        return toPushSubscription(row);
+      },
+      async listByManager(managerId) {
+        const rows = await db.pushSubscription.findMany({ where: { managerId } });
+        return rows.map(toPushSubscription);
+      },
+      async unsubscribe(endpoint) {
+        await db.pushSubscription.deleteMany({ where: { endpoint } });
+      },
+      async queue(record) {
+        const row = await db.pendingPush.create({
+          data: {
+            id: record.id,
+            managerId: record.managerId,
+            title: record.title,
+            body: record.body,
+            url: record.url ?? null,
+            sendAt: new Date(record.sendAt),
+            createdAt: new Date(record.createdAt),
+          },
+        });
+        return toPendingPush(row);
+      },
+      async listQueued(now) {
+        const rows = await db.pendingPush.findMany({
+          where: { sentAt: null, sendAt: { lte: new Date(now) } },
+        });
+        return rows.map(toPendingPush);
+      },
+      async markSent(id, at) {
+        await db.pendingPush.update({ where: { id }, data: { sentAt: new Date(at) } });
+      },
+    },
+
+    notificationPreferences: {
+      async get(establishmentId) {
+        const row = await db.notificationPreference.findUnique({ where: { establishmentId } });
+        return row ? toPreferences(row) : null;
+      },
+      async upsert(value) {
+        const data = {
+          channels: value.channels,
+          quietHoursStart: value.quietHours?.start ?? null,
+          quietHoursEnd: value.quietHours?.end ?? null,
+          utcOffsetHours: value.utcOffsetHours,
+        };
+        const row = await db.notificationPreference.upsert({
+          where: { establishmentId: value.establishmentId },
+          create: { establishmentId: value.establishmentId, ...data },
+          update: data,
+        });
+        return toPreferences(row);
+      },
+    },
+
+    pos: {
+      async findTicket(establishmentId, externalId) {
+        const row = await db.posTicket.findUnique({
+          where: { establishmentId_externalId: { establishmentId, externalId } },
+        });
+        return row ? toPosTicket(row) : null;
+      },
+      async createTicket(ticket) {
+        const row = await db.posTicket.create({
+          data: {
+            id: ticket.id,
+            establishmentId: ticket.establishmentId,
+            externalId: ticket.externalId,
+            closedAt: new Date(ticket.closedAt),
+            totalCents: ticket.totalCents,
+            contactHash: ticket.contactHash ?? null,
+            contactChannel: ticket.contactChannel ?? null,
+            reference: ticket.reference ?? null,
+            invitedAt: ticket.invitedAt ? new Date(ticket.invitedAt) : null,
+            createdAt: new Date(ticket.createdAt),
+          },
+        });
+        return toPosTicket(row);
+      },
+      async listTickets(establishmentId, since) {
+        const rows = await db.posTicket.findMany({
+          where: {
+            establishmentId,
+            ...(since ? { closedAt: { gte: new Date(since) } } : {}),
+          },
+          orderBy: { closedAt: 'desc' },
+        });
+        return rows.map(toPosTicket);
+      },
+      async markInvited(id, at) {
+        await db.posTicket.update({ where: { id }, data: { invitedAt: new Date(at) } });
+      },
+      async lastInvitedAt(establishmentId, contactHash) {
+        const row = await db.posTicket.findFirst({
+          where: { establishmentId, contactHash, invitedAt: { not: null } },
+          orderBy: { invitedAt: 'desc' },
+        });
+        return row?.invitedAt ? iso(row.invitedAt) : undefined;
+      },
+      async getCredential(establishmentId) {
+        const row = await db.posCredential.findUnique({ where: { establishmentId } });
+        return row ? toPosCredential(row) : null;
+      },
+      async upsertCredential(credential) {
+        const data = { vendor: credential.vendor, secretHash: credential.secretHash };
+        const row = await db.posCredential.upsert({
+          where: { establishmentId: credential.establishmentId },
+          create: { establishmentId: credential.establishmentId, ...data },
+          update: data,
+        });
+        return toPosCredential(row);
+      },
+      async touchCredential(establishmentId, at) {
+        await db.posCredential.update({
+          where: { establishmentId },
+          data: { lastUsedAt: new Date(at) },
+        });
+      },
+    },
+
     async close() {
       await db.$disconnect();
     },
@@ -400,6 +686,7 @@ function toManager(row: Row): Manager {
     email: String(row.email),
     passwordHash: String(row.passwordHash),
     name: String(row.name),
+    role: (row.role as Manager['role']) ?? 'owner',
     establishmentIds: establishments.map((e) => e.id),
     createdAt: iso(row.createdAt),
   };
@@ -535,6 +822,151 @@ function toLoyalty(row: Row): LoyaltyMember {
     points: Number(row.points ?? 0),
     createdAt: iso(row.createdAt),
     ...(row.lastEarnedAt ? { lastEarnedAt: iso(row.lastEarnedAt) } : {}),
+  };
+}
+
+function toSubscription(row: Row): Subscription {
+  const subscription: Subscription = {
+    id: String(row.id),
+    establishmentId: String(row.establishmentId),
+    plan: row.plan as Subscription['plan'],
+    addons: (row.addons as Subscription['addons']) ?? [],
+    extraPlatforms: Number(row.extraPlatforms ?? 0),
+    tags: Number(row.tags ?? 1),
+    committed12Months: Boolean(row.committed12Months),
+    status: row.status as Subscription['status'],
+    startedAt: iso(row.startedAt),
+    currentPeriodStart: iso(row.currentPeriodStart),
+    currentPeriodEnd: iso(row.currentPeriodEnd),
+  };
+  const trialEndsAt = optionalIso(row.trialEndsAt);
+  if (trialEndsAt) subscription.trialEndsAt = trialEndsAt;
+  const cancelAt = optionalIso(row.cancelAt);
+  if (cancelAt) subscription.cancelAt = cancelAt;
+  const canceledAt = optionalIso(row.canceledAt);
+  if (canceledAt) subscription.canceledAt = canceledAt;
+  return subscription;
+}
+
+const fromSubscription = (subscription: Subscription): Row => ({
+  id: subscription.id,
+  establishmentId: subscription.establishmentId,
+  plan: subscription.plan,
+  addons: subscription.addons,
+  extraPlatforms: subscription.extraPlatforms,
+  tags: subscription.tags,
+  committed12Months: subscription.committed12Months,
+  status: subscription.status,
+  startedAt: new Date(subscription.startedAt),
+  currentPeriodStart: new Date(subscription.currentPeriodStart),
+  currentPeriodEnd: new Date(subscription.currentPeriodEnd),
+  trialEndsAt: subscription.trialEndsAt ? new Date(subscription.trialEndsAt) : null,
+  cancelAt: subscription.cancelAt ? new Date(subscription.cancelAt) : null,
+  canceledAt: subscription.canceledAt ? new Date(subscription.canceledAt) : null,
+});
+
+function toInvoice(row: Row): Invoice {
+  const invoice: Invoice = {
+    id: String(row.id),
+    number: String(row.number),
+    establishmentId: String(row.establishmentId),
+    subscriptionId: String(row.subscriptionId),
+    status: row.status as Invoice['status'],
+    periodStart: iso(row.periodStart),
+    periodEnd: iso(row.periodEnd),
+    issuedAt: iso(row.issuedAt),
+    dueAt: iso(row.dueAt),
+    lines: (row.lines as Invoice['lines']) ?? [],
+    subtotalCents: Number(row.subtotalCents ?? 0),
+    vatCents: Number(row.vatCents ?? 0),
+    totalCents: Number(row.totalCents ?? 0),
+    remindersSent: Number(row.remindersSent ?? 0),
+  };
+  const paidAt = optionalIso(row.paidAt);
+  if (paidAt) invoice.paidAt = paidAt;
+  if (row.paymentReference) invoice.paymentReference = String(row.paymentReference);
+  return invoice;
+}
+
+const fromInvoice = (invoice: Omit<Invoice, 'id' | 'number'>): Row => ({
+  establishmentId: invoice.establishmentId,
+  subscriptionId: invoice.subscriptionId,
+  status: invoice.status,
+  periodStart: new Date(invoice.periodStart),
+  periodEnd: new Date(invoice.periodEnd),
+  issuedAt: new Date(invoice.issuedAt),
+  dueAt: new Date(invoice.dueAt),
+  paidAt: invoice.paidAt ? new Date(invoice.paidAt) : null,
+  lines: invoice.lines,
+  subtotalCents: invoice.subtotalCents,
+  vatCents: invoice.vatCents,
+  totalCents: invoice.totalCents,
+  paymentReference: invoice.paymentReference ?? null,
+  remindersSent: invoice.remindersSent,
+});
+
+function toPushSubscription(row: Row): PushSubscriptionRecord {
+  return {
+    id: String(row.id),
+    managerId: String(row.managerId),
+    endpoint: String(row.endpoint),
+    p256dh: String(row.p256dh),
+    auth: String(row.auth),
+    ...(row.userAgent ? { userAgent: String(row.userAgent) } : {}),
+    createdAt: iso(row.createdAt),
+    ...(row.lastUsedAt ? { lastUsedAt: iso(row.lastUsedAt) } : {}),
+  };
+}
+
+function toPendingPush(row: Row): PendingPushRecord {
+  return {
+    id: String(row.id),
+    managerId: String(row.managerId),
+    title: String(row.title),
+    body: String(row.body),
+    ...(row.url ? { url: String(row.url) } : {}),
+    sendAt: iso(row.sendAt),
+    ...(row.sentAt ? { sentAt: iso(row.sentAt) } : {}),
+    createdAt: iso(row.createdAt),
+  };
+}
+
+function toPreferences(row: Row): NotificationPreferences {
+  const start = row.quietHoursStart;
+  const end = row.quietHoursEnd;
+  return {
+    establishmentId: String(row.establishmentId),
+    channels: row.channels as NotificationPreferences['channels'],
+    quietHours:
+      start == null || end == null ? null : { start: Number(start), end: Number(end) },
+    utcOffsetHours: Number(row.utcOffsetHours ?? 2),
+  };
+}
+
+function toPosTicket(row: Row): PosTicketRecord {
+  return {
+    id: String(row.id),
+    establishmentId: String(row.establishmentId),
+    externalId: String(row.externalId),
+    closedAt: iso(row.closedAt),
+    totalCents: Number(row.totalCents ?? 0),
+    ...(row.contactHash ? { contactHash: String(row.contactHash) } : {}),
+    ...(row.contactChannel
+      ? { contactChannel: row.contactChannel as 'email' | 'sms' }
+      : {}),
+    ...(row.reference ? { reference: String(row.reference) } : {}),
+    ...(row.invitedAt ? { invitedAt: iso(row.invitedAt) } : {}),
+    createdAt: iso(row.createdAt),
+  };
+}
+
+function toPosCredential(row: Row): PosCredentialRecord {
+  return {
+    establishmentId: String(row.establishmentId),
+    vendor: String(row.vendor ?? 'generic'),
+    secretHash: String(row.secretHash),
+    createdAt: iso(row.createdAt),
+    ...(row.lastUsedAt ? { lastUsedAt: iso(row.lastUsedAt) } : {}),
   };
 }
 

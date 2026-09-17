@@ -12,13 +12,16 @@
 import type {
   Alert,
   Establishment,
+  Invoice,
   LoyaltyMember,
   Manager,
   NfcTag,
+  NotificationPreferences,
   PlatformId,
   PlatformLink,
   Review,
   ScanEvent,
+  Subscription,
 } from '@avisio/core';
 
 export interface ReviewQuery {
@@ -29,6 +32,49 @@ export interface ReviewQuery {
   limit?: number;
 }
 
+export interface PushSubscriptionRecord {
+  id: string;
+  managerId: string;
+  endpoint: string;
+  p256dh: string;
+  auth: string;
+  userAgent?: string;
+  createdAt: string;
+  lastUsedAt?: string;
+}
+
+export interface PendingPushRecord {
+  id: string;
+  managerId: string;
+  title: string;
+  body: string;
+  url?: string;
+  sendAt: string;
+  sentAt?: string;
+  createdAt: string;
+}
+
+export interface PosTicketRecord {
+  id: string;
+  establishmentId: string;
+  externalId: string;
+  closedAt: string;
+  totalCents: number;
+  contactHash?: string;
+  contactChannel?: 'email' | 'sms';
+  reference?: string;
+  invitedAt?: string;
+  createdAt: string;
+}
+
+export interface PosCredentialRecord {
+  establishmentId: string;
+  vendor: string;
+  secretHash: string;
+  createdAt: string;
+  lastUsedAt?: string;
+}
+
 export interface Repository {
   readonly kind: 'memory' | 'prisma';
 
@@ -37,7 +83,9 @@ export interface Repository {
     findById(id: string): Promise<Manager | null>;
     /** Destinataires des alertes d'un établissement. */
     listByEstablishment(establishmentId: string): Promise<Manager[]>;
+    listAll(): Promise<Manager[]>;
     create(manager: Manager): Promise<Manager>;
+    update(id: string, patch: Partial<Manager>): Promise<Manager>;
   };
 
   establishments: {
@@ -86,7 +134,12 @@ export interface Repository {
     listByEstablishment(establishmentId: string, limit?: number): Promise<Alert[]>;
     markRead(id: string, at: string): Promise<void>;
     /** Évite de réémettre la même alerte de tendance plusieurs jours de suite. */
-    existsSince(establishmentId: string, type: Alert['type'], title: string, since: string): Promise<boolean>;
+    existsSince(
+      establishmentId: string,
+      type: Alert['type'],
+      title: string,
+      since: string,
+    ): Promise<boolean>;
   };
 
   loyalty: {
@@ -94,6 +147,68 @@ export interface Repository {
     create(member: LoyaltyMember): Promise<LoyaltyMember>;
     update(id: string, patch: Partial<LoyaltyMember>): Promise<LoyaltyMember>;
     countByEstablishment(establishmentId: string): Promise<number>;
+  };
+
+  // -------------------------------------------------------------------------
+  // Facturation
+  // -------------------------------------------------------------------------
+
+  subscriptions: {
+    create(subscription: Subscription): Promise<Subscription>;
+    findByEstablishment(establishmentId: string): Promise<Subscription | null>;
+    findById(id: string): Promise<Subscription | null>;
+    listAll(): Promise<Subscription[]>;
+    /** Abonnements dont la période est échue : à facturer. */
+    listDue(now: string): Promise<Subscription[]>;
+    update(id: string, patch: Partial<Subscription>): Promise<Subscription>;
+  };
+
+  invoices: {
+    /**
+     * Crée la facture en réservant son numéro dans la même opération.
+     * C'est cette atomicité qui garantit une séquence sans trou.
+     */
+    create(invoice: Omit<Invoice, 'id' | 'number'>, year: number): Promise<Invoice>;
+    findById(id: string): Promise<Invoice | null>;
+    listByEstablishment(establishmentId: string): Promise<Invoice[]>;
+    listAll(): Promise<Invoice[]>;
+    /** Factures ouvertes dont l'échéance est dépassée. */
+    listOverdue(now: string): Promise<Invoice[]>;
+    update(id: string, patch: Partial<Invoice>): Promise<Invoice>;
+  };
+
+  // -------------------------------------------------------------------------
+  // Notifications
+  // -------------------------------------------------------------------------
+
+  push: {
+    subscribe(record: PushSubscriptionRecord): Promise<PushSubscriptionRecord>;
+    listByManager(managerId: string): Promise<PushSubscriptionRecord[]>;
+    unsubscribe(endpoint: string): Promise<void>;
+    queue(record: PendingPushRecord): Promise<PendingPushRecord>;
+    listQueued(now: string): Promise<PendingPushRecord[]>;
+    markSent(id: string, at: string): Promise<void>;
+  };
+
+  notificationPreferences: {
+    get(establishmentId: string): Promise<NotificationPreferences | null>;
+    upsert(preferences: NotificationPreferences): Promise<NotificationPreferences>;
+  };
+
+  // -------------------------------------------------------------------------
+  // Intégration caisse
+  // -------------------------------------------------------------------------
+
+  pos: {
+    findTicket(establishmentId: string, externalId: string): Promise<PosTicketRecord | null>;
+    createTicket(ticket: PosTicketRecord): Promise<PosTicketRecord>;
+    listTickets(establishmentId: string, since?: string): Promise<PosTicketRecord[]>;
+    markInvited(id: string, at: string): Promise<void>;
+    /** Dernière invitation envoyée à ce contact, pour la carence. */
+    lastInvitedAt(establishmentId: string, contactHash: string): Promise<string | undefined>;
+    getCredential(establishmentId: string): Promise<PosCredentialRecord | null>;
+    upsertCredential(credential: PosCredentialRecord): Promise<PosCredentialRecord>;
+    touchCredential(establishmentId: string, at: string): Promise<void>;
   };
 
   close(): Promise<void>;

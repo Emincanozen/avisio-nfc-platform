@@ -3,9 +3,8 @@
 // Souveraineté : l'instance de production est hébergée en France (OVHcloud
 // Gravelines ou AWS eu-west-3). Aucun avis ni contact ne sort de l'UE.
 //
-// Minimisation RGPD : le programme de fidélité ne stocke pas les coordonnées
-// du client, seulement un condensat (LoyaltyMember.contactHash). Les avis
-// contiennent le pseudonyme public affiché par la plateforme, tel que publié.
+// Minimisation RGPD : ni le programme de fidélité ni l'intégration caisse ne
+// stockent de coordonnées en clair — seulement un condensat.
 
 generator client {
   provider = "prisma-client-js"
@@ -77,37 +76,64 @@ enum LoyaltyChannel {
   email
 }
 
+enum ManagerRole {
+  owner
+  admin
+}
+
+enum SubscriptionStatus {
+  trialing
+  active
+  past_due
+  suspended
+  canceled
+}
+
+enum InvoiceStatus {
+  draft
+  open
+  paid
+  void
+  uncollectible
+}
+
 model Manager {
   id             String          @id
   email          String          @unique
   passwordHash   String
   name           String
+  role           ManagerRole     @default(owner)
   createdAt      DateTime        @default(now())
   establishments Establishment[] @relation("ManagerEstablishments")
+  pushSubscriptions PushSubscription[]
 
   @@map("managers")
 }
 
 model Establishment {
-  id                String         @id
+  id                String   @id
   name              String
   sector            Sector
   postalCode        String
   nafCode           String?
-  plan              Plan           @default(essentiel)
-  addons            Addon[]        @default([])
-  committed12Months Boolean        @default(false)
-  brandTone         String         @default("professionnel et courtois")
-  defaultLocale     String         @default("fr")
-  createdAt         DateTime       @default(now())
+  plan              Plan     @default(essentiel)
+  addons            Addon[]  @default([])
+  committed12Months Boolean  @default(false)
+  brandTone         String   @default("professionnel et courtois")
+  defaultLocale     String   @default("fr")
+  createdAt         DateTime @default(now())
 
-  managers      Manager[]      @relation("ManagerEstablishments")
-  platformLinks PlatformLink[]
-  tags          NfcTag[]
-  scans         ScanEvent[]
-  reviews       Review[]
-  alerts        Alert[]
+  managers       Manager[]       @relation("ManagerEstablishments")
+  platformLinks  PlatformLink[]
+  tags           NfcTag[]
+  scans          ScanEvent[]
+  reviews        Review[]
+  alerts         Alert[]
   loyaltyMembers LoyaltyMember[]
+  subscription   Subscription?
+  invoices       Invoice[]
+  notificationPreference NotificationPreference?
+  posTickets     PosTicket[]
 
   // Le benchmark interroge (secteur, code postal) sur toute la base.
   @@index([sector, postalCode])
@@ -116,14 +142,14 @@ model Establishment {
 }
 
 model PlatformLink {
-  id              String   @id @default(uuid())
+  id              String    @id @default(uuid())
   establishmentId String
   platform        Platform
   reviewUrl       String
   externalId      String?
-  enabled         Boolean  @default(true)
-  reviewCount     Int      @default(0)
-  routedScans     Int      @default(0)
+  enabled         Boolean   @default(true)
+  reviewCount     Int       @default(0)
+  routedScans     Int       @default(0)
   averageRating   Float?
   lastSyncedAt    DateTime?
 
@@ -182,12 +208,12 @@ model Review {
 
   // Résultat du pipeline NLP, dénormalisé pour éviter une jointure sur le
   // chemin chaud du dashboard.
-  sentiment       String?
-  sentimentScore  Float?
-  themes          String[]     @default([])
-  keywords        String[]     @default([])
-  language        String?
-  analysisEngine  String?
+  sentiment      String?
+  sentimentScore Float?
+  themes         String[] @default([])
+  keywords       String[] @default([])
+  language       String?
+  analysisEngine String?
 
   establishment Establishment @relation(fields: [establishmentId], references: [id], onDelete: Cascade)
   alerts        Alert[]
@@ -230,4 +256,156 @@ model LoyaltyMember {
 
   @@unique([establishmentId, contactHash])
   @@map("loyalty_members")
+}
+
+// ---------------------------------------------------------------------------
+// Facturation
+// ---------------------------------------------------------------------------
+
+model Subscription {
+  id                 String             @id
+  establishmentId    String             @unique
+  plan               Plan
+  addons             Addon[]            @default([])
+  extraPlatforms     Int                @default(0)
+  tags               Int                @default(1)
+  committed12Months  Boolean            @default(false)
+  status             SubscriptionStatus @default(active)
+  startedAt          DateTime
+  currentPeriodStart DateTime
+  currentPeriodEnd   DateTime
+  trialEndsAt        DateTime?
+  cancelAt           DateTime?
+  canceledAt         DateTime?
+
+  establishment Establishment @relation(fields: [establishmentId], references: [id], onDelete: Cascade)
+  invoices      Invoice[]
+
+  // La facturation balaie les abonnements dont la période est échue.
+  @@index([status, currentPeriodEnd])
+  @@map("subscriptions")
+}
+
+model Invoice {
+  id               String        @id
+  // Numérotation légale : continue, sans rupture, une séquence par année.
+  number           String        @unique
+  establishmentId  String
+  subscriptionId   String
+  status           InvoiceStatus @default(open)
+  periodStart      DateTime
+  periodEnd        DateTime
+  issuedAt         DateTime      @default(now())
+  dueAt            DateTime
+  paidAt           DateTime?
+  lines            Json
+  subtotalCents    Int
+  vatCents         Int
+  totalCents       Int
+  paymentReference String?
+  remindersSent    Int           @default(0)
+
+  establishment Establishment @relation(fields: [establishmentId], references: [id], onDelete: Cascade)
+  subscription  Subscription  @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
+
+  @@index([establishmentId, issuedAt])
+  @@index([status, dueAt])
+  @@map("invoices")
+}
+
+/**
+ * Compteur de numérotation, une ligne par année.
+ * Incrémenté dans la même transaction que la création de la facture : c'est ce
+ * qui garantit l'absence de trou dans la séquence.
+ */
+model InvoiceCounter {
+  year     Int @id
+  sequence Int @default(0)
+
+  @@map("invoice_counters")
+}
+
+// ---------------------------------------------------------------------------
+// Notifications
+// ---------------------------------------------------------------------------
+
+model PushSubscription {
+  id        String   @id
+  managerId String
+  endpoint  String   @unique
+  p256dh    String
+  auth      String
+  userAgent String?
+  createdAt DateTime @default(now())
+  lastUsedAt DateTime?
+
+  manager Manager @relation(fields: [managerId], references: [id], onDelete: Cascade)
+
+  @@index([managerId])
+  @@map("push_subscriptions")
+}
+
+model NotificationPreference {
+  establishmentId String  @id
+  // { "negative_review": ["email","push"], … }
+  channels        Json
+  quietHoursStart Int?
+  quietHoursEnd   Int?
+  utcOffsetHours  Int     @default(2)
+
+  establishment Establishment @relation(fields: [establishmentId], references: [id], onDelete: Cascade)
+
+  @@map("notification_preferences")
+}
+
+/** File des push différés par les heures calmes. */
+model PendingPush {
+  id        String   @id
+  managerId String
+  title     String
+  body      String
+  url       String?
+  sendAt    DateTime
+  sentAt    DateTime?
+  createdAt DateTime @default(now())
+
+  @@index([sentAt, sendAt])
+  @@map("pending_pushes")
+}
+
+// ---------------------------------------------------------------------------
+// Intégration caisse
+// ---------------------------------------------------------------------------
+
+model PosTicket {
+  id              String    @id
+  establishmentId String
+  externalId      String
+  closedAt        DateTime
+  totalCents      Int
+  // Condensat du contact : jamais l'e-mail ni le téléphone en clair.
+  contactHash     String?
+  contactChannel  String?
+  reference       String?
+  invitedAt       DateTime?
+  createdAt       DateTime  @default(now())
+
+  establishment Establishment @relation(fields: [establishmentId], references: [id], onDelete: Cascade)
+
+  // Idempotence : une caisse qui rejoue un ticket ne le duplique pas.
+  @@unique([establishmentId, externalId])
+  @@index([establishmentId, closedAt])
+  @@map("pos_tickets")
+}
+
+/** Clé d'API d'une caisse, pour signer ses appels webhook. */
+model PosCredential {
+  establishmentId String   @id
+  vendor          String   @default("generic")
+  // Condensat de la clé : elle n'est montrée qu'une fois, à la création.
+  secretHash      String
+  createdAt       DateTime @default(now())
+  lastUsedAt      DateTime?
+
+  @@map("pos_credentials")
 }

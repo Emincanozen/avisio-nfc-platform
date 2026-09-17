@@ -8,19 +8,26 @@
  */
 
 import {
+  DEFAULT_PREFERENCES,
   PLATFORM_LABELS,
+  addMonths,
+  buildInvoice,
   heuristicAnalysis,
   type Alert,
   type Establishment,
+  type Invoice,
   type LoyaltyMember,
   type Manager,
   type NfcTag,
+  type NotificationPreferences,
   type PlatformId,
   type PlatformLink,
   type Review,
   type ScanEvent,
+  type Subscription,
 } from '@avisio/core';
-import { hashPassword } from './auth.js';
+import { hashContact, hashPassword } from './auth.js';
+import type { PosCredentialRecord, PosTicketRecord } from './repository/types.js';
 
 export interface DemoDataset {
   managers: Manager[];
@@ -31,9 +38,17 @@ export interface DemoDataset {
   scans: ScanEvent[];
   alerts: Alert[];
   loyalty: LoyaltyMember[];
+  subscriptions: Subscription[];
+  invoices: Invoice[];
+  preferences: NotificationPreferences[];
+  posTickets: PosTicketRecord[];
+  posCredentials: PosCredentialRecord[];
 }
 
+/** Compte gérant : voit ses trois établissements. */
 export const DEMO_CREDENTIALS = { email: 'demo@avisio.fr', password: 'demo1234' };
+/** Compte exploitant : back-office, tout le parc, facturation. */
+export const DEMO_ADMIN_CREDENTIALS = { email: 'admin@avisio.fr', password: 'admin1234' };
 
 /** PRNG déterministe (mulberry32). */
 function rng(seed: number): () => number {
@@ -103,6 +118,18 @@ export function buildDemoDataset(now = new Date()): DemoDataset {
       email: DEMO_CREDENTIALS.email,
       passwordHash: hashPassword(DEMO_CREDENTIALS.password),
       name: 'Camille Ozen',
+      role: 'owner',
+      establishmentIds: establishments.map((e) => e.id),
+      createdAt: iso(400),
+    },
+    {
+      id: 'mgr_admin',
+      email: DEMO_ADMIN_CREDENTIALS.email,
+      passwordHash: hashPassword(DEMO_ADMIN_CREDENTIALS.password),
+      name: 'Exploitation Avisio',
+      role: 'admin',
+      // L'admin voit tout le parc via le back-office ; cette liste ne limite
+      // que son accès à l'espace gérant classique.
       establishmentIds: establishments.map((e) => e.id),
       createdAt: iso(400),
     },
@@ -294,7 +321,118 @@ export function buildDemoDataset(now = new Date()): DemoDataset {
     lastEarnedAt: iso(Math.floor(random() * 15)),
   }));
 
-  return { managers, establishments, platformLinks, tags, reviews, scans, alerts, loyalty };
+  // ---- Abonnements et factures -------------------------------------------
+  // Chaque établissement illustre un état de facturation différent : à jour,
+  // à jour, et une facture échue qui déclenche la relance.
+  const subscriptions: Subscription[] = establishments.map((establishment, index) => {
+    const startedAt = iso(index === 2 ? 90 : 400);
+    // La période en cours court jusqu'à l'anniversaire mensuel à venir.
+    let periodStart = startedAt;
+    while (new Date(addMonths(periodStart, 1)).getTime() < now.getTime()) {
+      periodStart = addMonths(periodStart, 1);
+    }
+    return {
+      id: `sub_${establishment.id}`,
+      establishmentId: establishment.id,
+      plan: establishment.plan,
+      addons: establishment.addons,
+      extraPlatforms: platformLinks.filter(
+        (l) => l.establishmentId === establishment.id && l.platform !== 'google',
+      ).length,
+      tags: tags.filter((t) => t.establishmentId === establishment.id).length,
+      committed12Months: establishment.committed12Months,
+      status: 'active',
+      startedAt,
+      currentPeriodStart: periodStart,
+      currentPeriodEnd: addMonths(periodStart, 1),
+    };
+  });
+
+  const invoices: Invoice[] = [];
+  let invoiceSeq = 0;
+  for (const subscription of subscriptions) {
+    // Trois dernières échéances : deux réglées, la plus récente ouverte.
+    for (let back = 3; back >= 1; back -= 1) {
+      invoiceSeq += 1;
+      const periodStart = addMonths(subscription.currentPeriodStart, -back);
+      const periodEnd = addMonths(periodStart, 1);
+      const draft = buildInvoice({
+        subscription,
+        periodStart,
+        periodEnd,
+        sequence: invoiceSeq,
+        issuedAt: periodStart,
+        includeOneOff: false,
+      });
+
+      // Hôtel Garonne : dernière facture impayée, échue depuis dix jours.
+      // Le retard est calé sur « maintenant » plutôt que sur la période, pour
+      // que la démonstration montre une relance en cours — et non une
+      // suspension déjà prononcée, qui ne dit rien du fonctionnement.
+      const unpaid = subscription.establishmentId === 'est_hotel' && back === 1;
+      invoices.push({
+        ...draft,
+        id: `inv_${invoiceSeq}`,
+        status: unpaid ? 'open' : 'paid',
+        ...(unpaid
+          ? { issuedAt: iso(25), dueAt: iso(10), remindersSent: 1 }
+          : { paidAt: new Date(new Date(draft.dueAt).getTime() - 86_400_000).toISOString() }),
+      });
+    }
+  }
+
+  const preferences: NotificationPreferences[] = establishments.map((e) =>
+    DEFAULT_PREFERENCES(e.id),
+  );
+
+  // ---- Intégration caisse (Premium seulement) ----------------------------
+  const posTickets: PosTicketRecord[] = Array.from({ length: 42 }, (_, i) => {
+    const hasContact = random() < 0.45;
+    const closedAt = iso(Math.floor(random() * 28), 12 + Math.floor(random() * 9));
+    return {
+      id: `pos_${i}`,
+      establishmentId: 'est_comptoir',
+      externalId: `TCK-${4200 + i}`,
+      closedAt,
+      totalCents: 1800 + Math.floor(random() * 7000),
+      ...(hasContact
+        ? {
+            contactHash: hashContact(`client${i}@exemple.fr`, 'demo-salt'),
+            contactChannel: 'email' as const,
+            invitedAt: closedAt,
+          }
+        : {}),
+      reference: `Table ${1 + Math.floor(random() * 18)}`,
+      createdAt: closedAt,
+    };
+  });
+
+  const posCredentials: PosCredentialRecord[] = [
+    {
+      establishmentId: 'est_comptoir',
+      vendor: 'generic',
+      // Condensat de la clé de démonstration « demo-pos-secret ».
+      secretHash: hashContact('demo-pos-secret', 'pos'),
+      createdAt: iso(60),
+      lastUsedAt: iso(0),
+    },
+  ];
+
+  return {
+    managers,
+    establishments,
+    platformLinks,
+    tags,
+    reviews,
+    scans,
+    alerts,
+    loyalty,
+    subscriptions,
+    invoices,
+    preferences,
+    posTickets,
+    posCredentials,
+  };
 
   // ---- Fabriques ---------------------------------------------------------
   function link(

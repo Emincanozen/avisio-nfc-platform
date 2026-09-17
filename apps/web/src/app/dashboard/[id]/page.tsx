@@ -2,7 +2,7 @@
 
 import { use, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { ApiError, api, clearToken } from '@/lib/api';
+import { API_URL, ApiError, api, clearToken, getToken } from '@/lib/api';
 import type { Alert, EstablishmentDetail, Overview } from '@/lib/types';
 import { Bar, Empty, Kpi, SeverityBadge, Sparkline, percent, relativeDays } from '@/components/ui';
 
@@ -240,6 +240,38 @@ export default function OverviewPage({ params }: { params: Promise<{ id: string 
         </div>
         <Sparkline values={overview.scans.byDay.map((d) => d.count)} />
       </section>
+
+      {detail.features.analytics && (
+        <section className="card">
+          <div className="spread" style={{ alignItems: 'flex-start' }}>
+            <div>
+              <h2 style={{ fontSize: 15, marginBottom: 4 }}>Rapport mensuel</h2>
+              <p className="muted" style={{ fontSize: 13.5, margin: 0 }}>
+                Envoyé automatiquement le 1er de chaque mois. Vous pouvez le
+                télécharger à tout moment pour le transmettre à votre équipe.
+              </p>
+            </div>
+            <button
+              type="button"
+              className="btn btn-ghost"
+              style={{ padding: '9px 14px', fontSize: 14 }}
+              onClick={async () => {
+                // Le PDF est servi derrière le jeton : on le récupère puis on
+                // ouvre l'objet local plutôt qu'un simple lien.
+                const response = await fetch(`${API_URL}/establishments/${id}/report.pdf`, {
+                  headers: { authorization: `Bearer ${getToken() ?? ''}` },
+                });
+                if (!response.ok) return;
+                const url = URL.createObjectURL(await response.blob());
+                window.open(url, '_blank', 'noopener');
+                setTimeout(() => URL.revokeObjectURL(url), 60_000);
+              }}
+            >
+              Télécharger le PDF
+            </button>
+          </div>
+        </section>
+      )}
 
       {detail.features.benchmark && (
         <section className="card">
