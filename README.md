@@ -153,6 +153,7 @@ infra/             PostgreSQL de développement
 
 | Document | Contenu |
 |---|---|
+| [`docs/etat-des-lieux.md`](docs/etat-des-lieux.md) | **Ce qui marche, ce qui est simulé, ce qui n'est pas fait** — vérifié ligne par ligne |
 | [`docs/business-plan.md`](docs/business-plan.md) | Le plan complet : problème, offre, conformité, économie, lancement, risques |
 | [`docs/modele-financier.md`](docs/modele-financier.md) | Projection 36 mois, économie unitaire, sensibilité — **généré** par `scripts/financial-model.ts` |
 | [`docs/architecture.md`](docs/architecture.md) | Architecture, modèle de données, moteur de routage, exploitation, passage à l'échelle |
@@ -164,6 +165,33 @@ Le modèle financier se régénère :
 ```bash
 npx tsx scripts/financial-model.ts
 ```
+
+## Est-ce que ça marche vraiment ?
+
+Question légitime, réponse précise dans [`docs/etat-des-lieux.md`](docs/etat-des-lieux.md).
+En résumé : **la chaîne de notification fonctionne et se vérifie**, mais elle
+n'est pas encore branchée sur les vrais avis Google.
+
+```
+1. Le client scanne et tape                    ✅
+2. Il dépose son avis sur Google               ✅
+3. Avisio lit cet avis                         ❌ accès API Google à demander
+4. Avisio l'analyse et crée une alerte         ✅ vérifié
+5. Avisio pousse la notification               ✅ vérifié
+6. Le gérant la reçoit sur son téléphone       ⚠️ vérifié en local
+```
+
+Pour le vérifier vous-même :
+
+```bash
+node scripts/push-selftest.mjs
+```
+
+Le script joue le navigateur du gérant et le service de push, en local et en
+TLS. Il vérifie que la notification part réellement — signée VAPID, chiffrée
+AES128GCM — puis qu'un avis négatif entrant déclenche bien une alerte et une
+notification. L'API doit tourner avec `NODE_TLS_REJECT_UNAUTHORIZED=0` le temps
+du test, le certificat du service simulé étant auto-signé.
 
 ## Ce qui n'est pas fait
 

@@ -76,7 +76,13 @@ export function createPushSender(
           await repo.push.unsubscribe(subscription.endpoint);
           logger.info('Abonnement push expiré, retiré.');
         } else {
-          logger.warn(`Envoi push en échec (${status ?? 'inconnu'}).`);
+          // Le motif est indispensable : sans lui, un push qui ne part pas
+          // ressemble à un push parti, et personne ne s'en aperçoit avant
+          // qu'un gérant signale ne rien recevoir.
+          const reason =
+            (error as { body?: string }).body ??
+            (error instanceof Error ? error.message : String(error));
+          logger.warn(`Envoi push en échec (${status ?? 'sans code HTTP'}) : ${reason}`);
         }
       }
     }
