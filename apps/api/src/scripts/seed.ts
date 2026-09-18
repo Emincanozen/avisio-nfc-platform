@@ -11,10 +11,23 @@
  */
 
 import { buildDemoDataset, DEMO_CREDENTIALS } from '../demo-data.js';
-import { capabilities } from '../env.js';
+import { capabilities, env } from '../env.js';
 import { createRepository } from '../repository/index.js';
 
 async function main(): Promise<void> {
+  // Le jeu de démonstration contient un compte d'exploitation dont le mot de
+  // passe est public (il est écrit dans le README). L'amorcer sur une base de
+  // production ouvrirait le back-office à qui a lu le dépôt.
+  if (env.nodeEnv === 'production' && !process.argv.includes('--force')) {
+    console.error(
+      'Refus : NODE_ENV=production.\n' +
+        'Le jeu de démonstration crée un compte administrateur dont le mot de passe\n' +
+        'est publié dans le README. Ne l’amorcez jamais sur une base réelle.\n' +
+        'Si c’est bien une base jetable, relancez avec --force.',
+    );
+    process.exit(1);
+  }
+
   if (!capabilities.persistence) {
     console.error(
       'DATABASE_URL absente : rien à amorcer. En mode mémoire, le jeu de\n' +
