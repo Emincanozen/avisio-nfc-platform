@@ -15,10 +15,17 @@ export interface LandingPayload {
     loyaltySuccess: string;
     disclosure: string;
     disclosureWithReward: string;
+    notConfigured: string;
     error: string;
     poweredBy: string;
   };
-  platform: { id: string; label: string };
+  /**
+   * Faux quand l'établissement n'a aucune plateforme d'avis active.
+   * La page s'affiche quand même — le client n'a pas à voir une erreur
+   * technique — mais sans bouton, puisqu'il n'y a nulle part où l'envoyer.
+   */
+  configured: boolean;
+  platform: { id: string; label: string } | null;
   loyaltyEnabled: boolean;
   disclosure: string;
 }

@@ -31,6 +31,15 @@ const fakeLlm: LlmService = {
       engine: 'llm',
     };
   },
+  // Le plafond de depense ne concerne pas la doublure : elle ne consomme rien.
+  usage: () => ({
+    calls: 0,
+    inputTokens: 0,
+    outputTokens: 0,
+    failures: 0,
+    throttled: 0,
+    windowStartedAt: new Date().toISOString(),
+  }),
   async suggestReply() {
     return { text: 'Merci pour votre retour.', warnings: [], engine: 'llm' };
   },

@@ -24,16 +24,58 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { httpError } from '../app.js';
 import { hashContact } from '../auth.js';
-import { env } from '../env.js';
+import { capabilities, env } from '../env.js';
 
 export async function registerPublicRoutes(app: FastifyInstance): Promise<void> {
   const { repo } = app.ctx;
 
-  app.get('/health', async () => ({
-    status: 'ok',
-    persistence: repo.kind,
-    time: new Date().toISOString(),
-  }));
+  /**
+   * Sonde de santé.
+   *
+   * Elle interroge réellement la persistance au lieu de se contenter de
+   * répondre. Une sonde qui dit « ok » parce que le processus Node est vivant
+   * ne sert à rien : c'est exactement pendant une panne de base que
+   * l'orchestrateur doit cesser d'envoyer du trafic, et c'est le seul moment
+   * où une sonde superficielle se trompe.
+   *
+   * Le 503 est volontaire : il retire l'instance du répartiteur de charge.
+   */
+  app.get('/health', async (_request, reply) => {
+    const startedAt = Date.now();
+    let persistenceOk = true;
+    let detail: string | undefined;
+
+    try {
+      // Requête délibérément triviale et bornée : on teste la liaison, pas
+      // la base. Une sonde coûteuse finit par être la cause de la panne
+      // qu'elle est censée détecter.
+      await repo.establishments.listByIds([]);
+    } catch (error) {
+      persistenceOk = false;
+      detail = error instanceof Error ? error.message : String(error);
+      app.log.error({ err: error }, 'Sonde de santé : persistance injoignable');
+    }
+
+    const body = {
+      status: persistenceOk ? 'ok' : 'degraded',
+      persistence: repo.kind,
+      persistenceOk,
+      ...(detail ? { detail } : {}),
+      /** Modes dégradés actifs : utile pour savoir ce qui est simulé. */
+      capabilities: {
+        persistence: capabilities.persistence,
+        llm: capabilities.llm,
+        googleOAuth: capabilities.googleOAuth,
+        email: capabilities.email,
+        push: capabilities.push,
+      },
+      uptimeSeconds: Math.round(process.uptime()),
+      checkMs: Date.now() - startedAt,
+      time: new Date().toISOString(),
+    };
+
+    return reply.code(persistenceOk ? 200 : 503).send(body);
+  });
 
   /**
    * Données de la landing page.
@@ -57,19 +99,44 @@ export async function registerPublicRoutes(app: FastifyInstance): Promise<void> 
 
     const links = await repo.platformLinks.listByEstablishment(establishment.id);
     const quota = platformQuota(establishment.plan, establishment.addons);
-    const decision = selectPlatform(links, establishment.sector, { quota });
-
     const loyaltyEnabled = hasFeature(establishment.plan, establishment.addons, 'loyalty');
 
-    return {
+    const base = {
       tag: { slug: tag.slug, label: tag.label },
       establishment: { id: establishment.id, name: establishment.name },
       locale,
       messages: messages(locale),
-      platform: { id: decision.platform, label: PLATFORM_LABELS[decision.platform] },
       loyaltyEnabled,
       disclosure: landingDisclosure(loyaltyEnabled),
     };
+
+    /**
+     * Établissement sans plateforme active.
+     *
+     * La page répond 200, avec `configured: false`, là où elle renvoyait 409.
+     * Ce n'est pas un relâchement : celui qui reçoit cette réponse est un
+     * client debout au comptoir, pas un opérateur. Lui servir une erreur
+     * technique lui ferait croire que l'établissement est en panne, alors que
+     * la page peut parfaitement s'afficher — dans sa langue, au nom de
+     * l'établissement — et lui dire simplement qu'il n'y a rien à faire.
+     *
+     * Le dépôt de scan, lui, continue de répondre 409 : il n'y a réellement
+     * aucune URL vers laquelle rediriger, et le mentir serait pire.
+     */
+    try {
+      const decision = selectPlatform(links, establishment.sector, { quota });
+      return {
+        ...base,
+        configured: true,
+        platform: { id: decision.platform, label: PLATFORM_LABELS[decision.platform] },
+      };
+    } catch (error) {
+      if ((error as Error).name !== 'NoRoutablePlatformError') throw error;
+      request.log.warn(
+        `Plaquette ${tag.slug} scannée sur ${establishment.name} sans plateforme active.`,
+      );
+      return { ...base, configured: false, platform: null };
+    }
   });
 
   /**

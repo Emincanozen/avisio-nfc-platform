@@ -27,6 +27,15 @@ const fakeLlm: LlmService = {
       engine: 'llm',
     };
   },
+  // Le plafond de depense ne concerne pas la doublure : elle ne consomme rien.
+  usage: () => ({
+    calls: 0,
+    inputTokens: 0,
+    outputTokens: 0,
+    failures: 0,
+    throttled: 0,
+    windowStartedAt: new Date().toISOString(),
+  }),
   async suggestReply() {
     return { text: 'Merci pour votre retour, nous en tenons compte.', warnings: [], engine: 'llm' };
   },
@@ -257,13 +266,22 @@ describe('parcours NFC', () => {
     });
     expect(disabled.statusCode).toBe(200);
 
+    // La page s'affiche — le client au comptoir ne doit pas voir une erreur
+    // technique — mais elle annonce qu'il n'y a rien à faire, dans sa langue
+    // et au nom de l'établissement.
     const page = await app.inject({ method: 'GET', url: `/public/tag/${slug}` });
-    expect(page.statusCode).toBe(409);
-    expect(page.json().code).toBe('not_configured');
-    expect(page.json().error).toContain('Google');
+    expect(page.statusCode).toBe(200);
+    expect(page.json().configured).toBe(false);
+    expect(page.json().platform).toBeNull();
+    expect(page.json().establishment.name).toBeTruthy();
+    expect(page.json().messages.notConfigured).toBeTruthy();
 
+    // Le dépôt de scan, lui, reste un 409 : il n'existe réellement aucune URL
+    // vers laquelle rediriger, et renvoyer un succès serait mentir.
     const scan = await app.inject({ method: 'POST', url: `/public/tag/${slug}/scan` });
     expect(scan.statusCode).toBe(409);
+    expect(scan.json().code).toBe('not_configured');
+    expect(scan.json().error).toContain('Google');
   });
 
   it('enregistre le scan et renvoie une URL de dépôt d’avis', async () => {

@@ -71,6 +71,17 @@ export const env = {
     iban: str('COMPANY_IBAN', ''),
   },
 
+  /**
+   * Plafond d'appels au modele de langage, par heure et par processus.
+   *
+   * Tres au-dessus de l'usage attendu : il ne sert que dans le cas qu'il vise,
+   * quelque chose qui s'emballe (une boucle, un import massif). Le depassement
+   * bascule sur le moteur heuristique, il ne fait echouer personne.
+   */
+  llmMaxCallsPerHour: num('LLM_MAX_CALLS_PER_HOUR', 500),
+  /** Delai de garde d'un appel au modele. Au-dela, repli local. */
+  llmTimeoutMs: num('LLM_TIMEOUT_MS', 30000),
+
   ingestIntervalMinutes: num('INGEST_INTERVAL_MINUTES', 20),
   billingIntervalHours: num('BILLING_INTERVAL_HOURS', 6),
 

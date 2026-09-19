@@ -21,6 +21,8 @@ export interface LandingMessages {
   loyaltySuccess: string;
   disclosure: string;
   disclosureWithReward: string;
+  /** Plaquette valide, mais l'établissement n'a pas encore de plateforme active. */
+  notConfigured: string;
   error: string;
   poweredBy: string;
 }
@@ -39,6 +41,8 @@ const MESSAGES: Record<Locale, LandingMessages> = {
       'Votre avis est publié directement sur la plateforme, sans relecture ni filtrage de notre part.',
     disclosureWithReward:
       'Les points sont accordés pour le dépôt d’un avis, quelle que soit la note. Votre avis est publié directement sur la plateforme.',
+    notConfigured:
+      'Cet établissement n’a pas encore ouvert le dépôt d’avis. Merci de votre visite !',
     error: 'Cette plaquette n’est pas encore activée. Signalez-le à l’établissement.',
     poweredBy: 'Propulsé par Avisio',
   },
@@ -55,6 +59,8 @@ const MESSAGES: Record<Locale, LandingMessages> = {
       'Your review is posted straight to the platform. We never screen or filter it.',
     disclosureWithReward:
       'Points are granted for posting a review, whatever the rating. Your review goes straight to the platform.',
+    notConfigured:
+      'This business has not opened reviews yet. Thanks for stopping by!',
     error: 'This tag is not active yet. Please let the staff know.',
     poweredBy: 'Powered by Avisio',
   },
@@ -71,6 +77,8 @@ const MESSAGES: Record<Locale, LandingMessages> = {
       'Su opinión se publica directamente en la plataforma, sin revisión ni filtro por nuestra parte.',
     disclosureWithReward:
       'Los puntos se conceden por publicar una opinión, sea cual sea la nota. Su opinión se publica directamente.',
+    notConfigured:
+      'Este establecimiento aún no ha abierto las reseñas. ¡Gracias por su visita!',
     error: 'Esta placa aún no está activada. Avise al establecimiento.',
     poweredBy: 'Con tecnología de Avisio',
   },
@@ -87,6 +95,8 @@ const MESSAGES: Record<Locale, LandingMessages> = {
       'Ihre Bewertung wird direkt auf der Plattform veröffentlicht – ohne Prüfung oder Filterung.',
     disclosureWithReward:
       'Punkte gibt es für das Abgeben einer Bewertung, unabhängig von der Note.',
+    notConfigured:
+      'Dieser Betrieb hat die Bewertungen noch nicht freigeschaltet. Danke für Ihren Besuch!',
     error: 'Dieses Schild ist noch nicht aktiv. Bitte informieren Sie das Personal.',
     poweredBy: 'Bereitgestellt von Avisio',
   },
@@ -103,6 +113,8 @@ const MESSAGES: Record<Locale, LandingMessages> = {
       'La tua recensione viene pubblicata direttamente sulla piattaforma, senza filtri da parte nostra.',
     disclosureWithReward:
       'I punti sono assegnati per la pubblicazione di una recensione, qualunque sia il voto.',
+    notConfigured:
+      'Questa attività non ha ancora aperto le recensioni. Grazie della visita!',
     error: 'Questa targhetta non è ancora attiva. Segnalalo al personale.',
     poweredBy: 'Realizzato con Avisio',
   },
@@ -119,6 +131,8 @@ const MESSAGES: Record<Locale, LandingMessages> = {
       'Uw review wordt rechtstreeks op het platform geplaatst, zonder controle of filtering.',
     disclosureWithReward:
       'Punten worden toegekend voor het plaatsen van een review, ongeacht de score.',
+    notConfigured:
+      'Deze zaak heeft reviews nog niet opengesteld. Bedankt voor uw bezoek!',
     error: 'Deze tag is nog niet geactiveerd. Meld dit aan het personeel.',
     poweredBy: 'Mogelijk gemaakt door Avisio',
   },

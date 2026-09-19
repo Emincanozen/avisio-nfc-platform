@@ -171,13 +171,22 @@ export function createIngestService(deps: Deps) {
     return created;
   }
 
+  /**
+   * Date du dernier avis connu sur cette plateforme.
+   *
+   * Le filtre par plateforme est demandé à la base, pas appliqué après coup :
+   * en prenant les 200 avis les plus récents toutes plateformes confondues,
+   * un établissement très actif sur Google pouvait n'avoir aucun avis
+   * TripAdvisor dans la tranche. La borne était alors perdue, et le
+   * connecteur rapatriait tout l'historique à chaque cycle — du quota d'API
+   * tierce brûlé pour rien, à chaque passage.
+   */
   async function lastReviewDate(
     establishmentId: string,
     platform: PlatformId,
   ): Promise<string | undefined> {
-    const recent = await repo.reviews.query({ establishmentId, limit: 200 });
-    const onPlatform = recent.filter((r) => r.platform === platform);
-    return onPlatform[0]?.publishedAt;
+    const recent = await repo.reviews.query({ establishmentId, platform, limit: 1 });
+    return recent[0]?.publishedAt;
   }
 
   /**

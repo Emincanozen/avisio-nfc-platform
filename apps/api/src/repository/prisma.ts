@@ -310,6 +310,7 @@ export async function createPrismaRepository(): Promise<Repository> {
             establishmentId: query.establishmentId,
             status: query.status,
             rating: query.maxRating == null ? undefined : { lte: query.maxRating },
+            platform: query.platform,
             publishedAt: query.since ? { gte: new Date(query.since) } : undefined,
           }),
           orderBy: { publishedAt: 'desc' },

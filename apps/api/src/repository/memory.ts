@@ -493,6 +493,7 @@ export function filterReviews(all: Review[], query: ReviewQuery): Review[] {
     .filter((r) => r.establishmentId === query.establishmentId)
     .filter((r) => (query.status ? r.status === query.status : true))
     .filter((r) => (query.maxRating == null ? true : r.rating <= query.maxRating))
+    .filter((r) => (query.platform ? r.platform === query.platform : true))
     .filter((r) => (since == null ? true : new Date(r.publishedAt).getTime() >= since))
     .sort((a, b) => b.publishedAt.localeCompare(a.publishedAt))
     .slice(0, query.limit ?? 200);

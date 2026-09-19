@@ -41,6 +41,31 @@ export default async function NfcLandingPage({
     '{establishment}',
     data.establishment.name,
   );
+
+  /**
+   * Établissement dont aucune plateforme n'est active.
+   *
+   * La plaquette existe et fonctionne : c'est la configuration qui manque.
+   * Le client, lui, est debout au comptoir avec son téléphone — il mérite une
+   * page dans sa langue, au nom de l'établissement, qui lui dit simplement
+   * qu'il n'y a rien à faire. Pas un écran d'erreur, qui lui laisserait
+   * croire que l'établissement est en panne.
+   */
+  if (!data.configured || !data.platform) {
+    return (
+      <main className="nfc" lang={data.locale}>
+        <div className="eyebrow">{data.establishment.name}</div>
+        <h1>{data.messages.title}</h1>
+        <p className="muted" style={{ marginTop: 0, fontSize: 16 }}>
+          {data.messages.notConfigured}
+        </p>
+        <p className="disclosure" style={{ marginTop: 28, opacity: 0.7 }}>
+          {data.messages.poweredBy}
+        </p>
+      </main>
+    );
+  }
+
   const cta = data.messages.cta.replace('{platform}', data.platform.label);
 
   return (

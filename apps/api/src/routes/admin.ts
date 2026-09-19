@@ -59,7 +59,7 @@ const onboardingSchema = z.object({
 });
 
 export async function registerAdminRoutes(app: FastifyInstance): Promise<void> {
-  const { repo, billing, reports, ingest, push } = app.ctx;
+  const { repo, billing, reports, ingest, push, llm } = app.ctx;
   const adminRoute = { onRequest: [app.requireAdmin] };
 
   // ---- Vue d'ensemble ----------------------------------------------------
@@ -92,7 +92,18 @@ export async function registerAdminRoutes(app: FastifyInstance): Promise<void> {
       signupsThisMonth,
       churn: observedChurn(subscriptions, monthStart, monthEnd),
       reviewsTotal: reviews.length,
+      importedReviews: reviews.filter((r) => r.source === 'import').length,
       unansweredNegatives: reviews.filter((r) => r.rating <= 3 && r.status !== 'answered').length,
+      /**
+       * Consommation du modèle de langage sur l'heure en cours.
+       *
+       * Exposée parce qu'un plafond qu'on ne voit pas ne se règle jamais
+       * correctement : on ignore où le placer tant qu'on ne sait pas ce que
+       * consomme une journée ordinaire. `throttled` à zéro est le cas normal ;
+       * s'il monte, soit quelque chose s'emballe, soit le plafond est trop bas.
+       */
+      llm: llm.usage(),
+      googleConnections: (await repo.googleConnections.listAll()).length,
       capabilities: {
         push: push.enabled,
       },

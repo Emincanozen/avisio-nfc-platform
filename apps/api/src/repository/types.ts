@@ -29,6 +29,17 @@ export interface ReviewQuery {
   status?: Review['status'];
   maxRating?: number;
   since?: string;
+  /**
+   * Restreint à une plateforme.
+   *
+   * Nécessaire pour trouver le dernier avis connu SUR une plateforme donnée.
+   * Sans ce filtre, on prenait les 200 avis les plus récents toutes
+   * plateformes confondues : un établissement très actif sur Google pouvait
+   * n'avoir aucun avis TripAdvisor dans cette tranche, la borne temporelle
+   * était alors perdue et le connecteur rapatriait tout l'historique à chaque
+   * cycle — de la latence, et du quota d'API tierce brûlé pour rien.
+   */
+  platform?: Review['platform'];
   limit?: number;
 }
 
