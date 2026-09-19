@@ -24,6 +24,7 @@ import type {
   ThemeId,
 } from '@avisio/core';
 import type {
+  GoogleConnectionRecord,
   PendingPushRecord,
   PosCredentialRecord,
   PosTicketRecord,
@@ -63,6 +64,7 @@ interface PrismaLike {
   pendingPush: Delegate;
   posTicket: Delegate;
   posCredential: Delegate;
+  googleConnection: Delegate;
   rateCounter: Delegate;
   /** Réservation atomique du numéro de facture : séquence sans trou. */
   $transaction<T>(fn: (tx: PrismaLike) => Promise<T>): Promise<T>;
@@ -675,6 +677,52 @@ export async function createPrismaRepository(): Promise<Repository> {
       },
     },
 
+    googleConnections: {
+      async get(establishmentId) {
+        const row = await db.googleConnection.findUnique({ where: { establishmentId } });
+        return row ? toGoogleConnection(row) : null;
+      },
+      async upsert(record) {
+        const data = {
+          refreshTokenSealed: record.refreshTokenSealed,
+          scope: record.scope,
+          locationName: record.locationName ?? null,
+          locationTitle: record.locationTitle ?? null,
+          authorizedBy: record.authorizedBy ?? null,
+          connectedAt: new Date(record.connectedAt),
+          lastSyncAt: record.lastSyncAt ? new Date(record.lastSyncAt) : null,
+          lastError: record.lastError ?? null,
+        };
+        const row = await db.googleConnection.upsert({
+          where: { establishmentId: record.establishmentId },
+          create: { establishmentId: record.establishmentId, ...data },
+          update: data,
+        });
+        return toGoogleConnection(row);
+      },
+      async update(establishmentId, patch) {
+        const row = await db.googleConnection.update({
+          where: { establishmentId },
+          data: stripUndefined({
+            refreshTokenSealed: patch.refreshTokenSealed,
+            scope: patch.scope,
+            // `null` est significatif ici : il efface la sélection ou l'erreur.
+            locationName: 'locationName' in patch ? (patch.locationName ?? null) : undefined,
+            locationTitle: 'locationTitle' in patch ? (patch.locationTitle ?? null) : undefined,
+            lastSyncAt: patch.lastSyncAt ? new Date(patch.lastSyncAt) : undefined,
+            lastError: 'lastError' in patch ? (patch.lastError ?? null) : undefined,
+          }),
+        });
+        return toGoogleConnection(row);
+      },
+      async remove(establishmentId) {
+        await db.googleConnection.deleteMany({ where: { establishmentId } });
+      },
+      async listAll() {
+        return (await db.googleConnection.findMany()).map(toGoogleConnection);
+      },
+    },
+
     rateLimit: {
       async hit(key, expiresAt) {
         // Un `upsert` Prisma ferait un SELECT puis un INSERT/UPDATE : deux
@@ -796,6 +844,7 @@ function toReview(row: Row): Review {
     comment: String(row.comment),
     publishedAt: iso(row.publishedAt),
     ingestedAt: iso(row.ingestedAt),
+    source: (row.source as Review['source']) ?? 'sync',
     status: row.status as Review['status'],
   };
   const replyText = row.replyText == null ? undefined : String(row.replyText);
@@ -826,6 +875,7 @@ function fromReview(review: Review): Row {
     comment: review.comment,
     publishedAt: new Date(review.publishedAt),
     ingestedAt: new Date(review.ingestedAt),
+    source: review.source ?? 'sync',
     status: review.status,
     replyText: review.replyText ?? null,
     repliedAt: review.repliedAt ? new Date(review.repliedAt) : null,
@@ -996,6 +1046,20 @@ function toPosTicket(row: Row): PosTicketRecord {
     ...(row.reference ? { reference: String(row.reference) } : {}),
     ...(row.invitedAt ? { invitedAt: iso(row.invitedAt) } : {}),
     createdAt: iso(row.createdAt),
+  };
+}
+
+function toGoogleConnection(row: Row): GoogleConnectionRecord {
+  return {
+    establishmentId: String(row.establishmentId),
+    refreshTokenSealed: String(row.refreshTokenSealed),
+    scope: String(row.scope ?? ''),
+    ...(row.locationName ? { locationName: String(row.locationName) } : {}),
+    ...(row.locationTitle ? { locationTitle: String(row.locationTitle) } : {}),
+    ...(row.authorizedBy ? { authorizedBy: String(row.authorizedBy) } : {}),
+    connectedAt: iso(row.connectedAt),
+    ...(row.lastSyncAt ? { lastSyncAt: iso(row.lastSyncAt) } : {}),
+    ...(row.lastError ? { lastError: String(row.lastError) } : {}),
   };
 }
 

@@ -7,6 +7,7 @@ import { use } from 'react';
 const TABS = [
   { href: '', label: 'Vue d’ensemble' },
   { href: '/avis', label: 'Avis & réponses' },
+  { href: '/sources', label: 'Sources d’avis' },
   { href: '/plaquettes', label: 'Plaquettes NFC' },
   { href: '/caisse', label: 'Caisse' },
   { href: '/factures', label: 'Abonnement & factures' },

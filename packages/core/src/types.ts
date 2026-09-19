@@ -100,6 +100,17 @@ export interface Review {
   publishedAt: string;
   /** Date de récupération par l'ingestion. */
   ingestedAt: string;
+  /**
+   * Provenance de l'avis.
+   *
+   * `sync` : rapatrié par un connecteur de plateforme.
+   * `import` : chargé à la main depuis un export, en attendant l'accès API.
+   *
+   * Absent sur les avis antérieurs à ce champ, traités comme `sync`. La
+   * distinction existe pour qu'aucun chiffre du tableau de bord ne puisse
+   * laisser croire à une connexion en direct qui n'existe pas.
+   */
+  source?: 'sync' | 'import';
   status: ReviewStatus;
   replyText?: string;
   repliedAt?: string;

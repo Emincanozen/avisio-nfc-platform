@@ -134,6 +134,7 @@ model Establishment {
   invoices       Invoice[]
   notificationPreference NotificationPreference?
   posTickets     PosTicket[]
+  googleConnection GoogleConnection?
 
   // Le benchmark interroge (secteur, code postal) sur toute la base.
   @@index([sector, postalCode])
@@ -202,6 +203,10 @@ model Review {
   comment         String
   publishedAt     DateTime
   ingestedAt      DateTime     @default(now())
+  // Provenance : "sync" (connecteur de plateforme) ou "import" (export chargé
+  // à la main en attendant l'accès API). La distinction existe pour qu'aucun
+  // chiffre ne laisse croire à une connexion en direct qui n'existe pas.
+  source          String       @default("sync")
   status          ReviewStatus @default(new)
   replyText       String?
   repliedAt       DateTime?
@@ -433,4 +438,37 @@ model RateCounter {
   // Le balayage des fenetres expirees se fait par cet index.
   @@index([expiresAt])
   @@map("rate_counters")
+}
+
+// ---------------------------------------------------------------------------
+// Connexion Google par etablissement
+// ---------------------------------------------------------------------------
+
+/**
+ * Autorisation OAuth donnee par le proprietaire d'une fiche Google.
+ *
+ * Une ligne par etablissement, et non une cle globale dans l'environnement :
+ * la fiche appartient au client, personne ne peut consentir a sa place, et
+ * retirer un client du parc doit revoquer son acces et rien d'autre.
+ *
+ * Le jeton de rafraichissement est scelle (AES-256-GCM, cf. services/secrets).
+ * Il donne acces a la fiche jusqu'a revocation : en clair dans une table, une
+ * sauvegarde egaree suffirait a le livrer.
+ */
+model GoogleConnection {
+  establishmentId    String    @id
+  refreshTokenSealed String
+  scope              String
+  locationName       String?
+  locationTitle      String?
+  authorizedBy       String?
+  connectedAt        DateTime  @default(now())
+  lastSyncAt         DateTime?
+  // Derniere erreur de synchronisation : une connexion rompue en silence est
+  // pire que pas de connexion, le client se croit couvert sans l'etre.
+  lastError          String?
+
+  establishment Establishment @relation(fields: [establishmentId], references: [id], onDelete: Cascade)
+
+  @@map("google_connections")
 }

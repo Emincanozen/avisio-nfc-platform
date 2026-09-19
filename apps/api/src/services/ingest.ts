@@ -23,8 +23,8 @@ import {
 import { PLATFORM_LABELS } from '@avisio/core';
 import type { Repository } from '../repository/index.js';
 import type { LlmService } from './anthropic.js';
-import type { ReviewConnector } from './google.js';
-import { toDomainReview } from './google.js';
+import type { ConnectorTarget, ReviewConnector } from './google.js';
+import { NotConnectedError, toDomainReview } from './google.js';
 import type { Notifier } from './notify.js';
 
 export interface IngestReport {
@@ -58,18 +58,26 @@ export function createIngestService(deps: Deps) {
       const connector = connectors.get(link.platform);
       if (!connector) continue;
 
-      const locationId = link.externalId ?? link.establishmentId;
+      const target: ConnectorTarget = {
+        establishmentId: establishment.id,
+        externalId: link.externalId ?? null,
+      };
       const lastKnown = await lastReviewDate(establishment.id, link.platform);
 
       let externals;
       try {
-        externals = await connector.fetchReviews(locationId, lastKnown);
+        externals = await connector.fetchReviews(target, lastKnown);
       } catch (error) {
-        logger.warn(
-          `Ingestion ${link.platform} pour ${establishment.name} : ${(error as Error).message}`,
-        );
+        // Une fiche non connectée n'est pas un incident : c'est un onboarding
+        // en cours. On l'enregistre sur la connexion pour que l'interface
+        // puisse le dire au client, sans polluer les journaux d'exploitation.
+        if (error instanceof NotConnectedError) continue;
+        const message = (error as Error).message;
+        logger.warn(`Ingestion ${link.platform} pour ${establishment.name} : ${message}`);
+        if (link.platform === 'google') await noteGoogleError(establishment.id, message);
         continue;
       }
+      if (link.platform === 'google') await clearGoogleError(establishment.id);
 
       const candidates = externals.map((e) => toDomainReview(e, establishment.id, link.platform));
       const created = await repo.reviews.upsertMany(candidates);
@@ -86,7 +94,7 @@ export function createIngestService(deps: Deps) {
 
       // Synchronisation des compteurs : elle pilote le moteur de routage.
       try {
-        const counters = await connector.fetchCounters(locationId);
+        const counters = await connector.fetchCounters(target);
         if (counters) {
           await repo.platformLinks.syncCounts(establishment.id, link.platform, counters);
         }
@@ -170,6 +178,29 @@ export function createIngestService(deps: Deps) {
     const recent = await repo.reviews.query({ establishmentId, limit: 200 });
     const onPlatform = recent.filter((r) => r.platform === platform);
     return onPlatform[0]?.publishedAt;
+  }
+
+  /**
+   * Inscrit l'échec sur la connexion Google.
+   *
+   * Sans cela, une autorisation révoquée par le client — ou expirée — ferait
+   * échouer chaque cycle en silence : il continuerait de croire ses avis
+   * surveillés alors que plus rien n'entre.
+   */
+  async function noteGoogleError(establishmentId: string, message: string): Promise<void> {
+    const connection = await repo.googleConnections.get(establishmentId);
+    if (!connection) return;
+    await repo.googleConnections
+      .update(establishmentId, { lastError: message.slice(0, 500) })
+      .catch(() => undefined);
+  }
+
+  async function clearGoogleError(establishmentId: string): Promise<void> {
+    const connection = await repo.googleConnections.get(establishmentId);
+    if (!connection) return;
+    await repo.googleConnections
+      .update(establishmentId, { lastError: undefined, lastSyncAt: new Date().toISOString() })
+      .catch(() => undefined);
   }
 
   async function managerEmails(establishmentId: string): Promise<string[]> {

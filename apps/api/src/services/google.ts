@@ -31,63 +31,79 @@ export interface PlatformCounters {
   averageRating?: number;
 }
 
+/**
+ * Ce qu'un connecteur reçoit pour travailler.
+ *
+ * L'identifiant d'établissement en fait partie — et non seulement
+ * l'identifiant de fiche — parce que l'autorisation d'accès est propre à
+ * chaque client : c'est lui qui permet de retrouver SON jeton. Un connecteur
+ * qui ne recevrait que l'identifiant de fiche imposerait un jeton global, ce
+ * qui n'existe pas chez Google.
+ */
+export interface ConnectorTarget {
+  establishmentId: string;
+  /** Identifiant côté plateforme (`locations/123…`, place id, page id…). */
+  externalId: string | null;
+}
+
 export interface ReviewConnector {
   readonly platform: PlatformId;
   readonly live: boolean;
   /** Avis publiés depuis `since`, du plus récent au plus ancien. */
-  fetchReviews(externalLocationId: string, since?: string): Promise<ExternalReview[]>;
-  fetchCounters(externalLocationId: string): Promise<PlatformCounters | null>;
+  fetchReviews(target: ConnectorTarget, since?: string): Promise<ExternalReview[]>;
+  fetchCounters(target: ConnectorTarget): Promise<PlatformCounters | null>;
   /** Publie la réponse du gérant sur la plateforme. */
-  publishReply(externalLocationId: string, reviewExternalId: string, text: string): Promise<void>;
+  publishReply(target: ConnectorTarget, reviewExternalId: string, text: string): Promise<void>;
 }
+
+/**
+ * Fournit le jeton d'accès valide d'un établissement, ou `null` s'il n'a pas
+ * (ou plus) autorisé Avisio sur sa fiche.
+ */
+export type AccessTokenProvider = (establishmentId: string) => Promise<string | null>;
 
 const GOOGLE_API = 'https://mybusiness.googleapis.com/v4';
 const TOKEN_URL = 'https://oauth2.googleapis.com/token';
 
-export function createGoogleConnector(logger: {
-  warn: (msg: string) => void;
-  info: (msg: string) => void;
-}): ReviewConnector {
-  if (!capabilities.googleReviews) {
-    logger.info('Google Business Profile non configuré : connecteur simulé actif.');
-    return createSimulatedConnector('google');
-  }
+/**
+ * Connecteur Google réel.
+ *
+ * Il ne détient aucun jeton : il en demande un à `tokenFor`, qui va le
+ * chercher dans l'autorisation donnée par le propriétaire de la fiche. Sans
+ * autorisation, il ne se plaint pas — il ne renvoie rien. C'est le
+ * comportement juste : un établissement qui n'a pas connecté Google n'est pas
+ * une erreur d'exploitation, c'est un onboarding en cours.
+ */
+export function createGoogleConnector(
+  logger: { warn: (msg: string) => void; info: (msg: string) => void },
+  tokenFor: AccessTokenProvider,
+): ReviewConnector {
+  const call = async (
+    establishmentId: string,
+    path: string,
+    init: RequestInit = {},
+  ): Promise<unknown> => {
+    const accessToken = await tokenFor(establishmentId);
+    if (!accessToken) throw new NotConnectedError(establishmentId);
 
-  let accessToken: { value: string; expiresAt: number } | null = null;
-
-  const token = async (): Promise<string> => {
-    if (accessToken && accessToken.expiresAt > Date.now() + 30_000) return accessToken.value;
-    const response = await fetch(TOKEN_URL, {
-      method: 'POST',
-      headers: { 'content-type': 'application/x-www-form-urlencoded' },
-      body: new URLSearchParams({
-        client_id: env.google.clientId,
-        client_secret: env.google.clientSecret,
-        refresh_token: env.google.refreshToken,
-        grant_type: 'refresh_token',
-      }),
-    });
-    if (!response.ok) {
-      throw new Error(`Rafraîchissement du jeton Google refusé (${response.status})`);
-    }
-    const body = (await response.json()) as { access_token: string; expires_in: number };
-    accessToken = {
-      value: body.access_token,
-      expiresAt: Date.now() + body.expires_in * 1000,
-    };
-    return accessToken.value;
-  };
-
-  const call = async (path: string, init: RequestInit = {}): Promise<unknown> => {
     const response = await fetch(`${GOOGLE_API}/${path}`, {
       ...init,
       headers: {
         ...(init.headers ?? {}),
-        authorization: `Bearer ${await token()}`,
+        authorization: `Bearer ${accessToken}`,
         'content-type': 'application/json',
       },
     });
-    if (response.status === 429) throw new Error('Quota Google atteint');
+    if (response.status === 429) {
+      // Message explicite : c'est l'erreur que rencontre tout projet dont la
+      // demande d'accès n'a pas encore été approuvée — quota par défaut à 0.
+      throw new Error(
+        'Quota Google épuisé (un projet non encore approuvé a un quota de 0 requête/minute)',
+      );
+    }
+    if (response.status === 401 || response.status === 403) {
+      throw new Error(`Autorisation Google refusée (${response.status}) sur ${path}`);
+    }
     if (!response.ok) throw new Error(`Google API ${response.status} sur ${path}`);
     return response.json();
   };
@@ -96,7 +112,9 @@ export function createGoogleConnector(logger: {
     platform: 'google',
     live: true,
 
-    async fetchReviews(locationName, since) {
+    async fetchReviews({ establishmentId, externalId }, since) {
+      if (!externalId) return [];
+      const locationName = externalId;
       const floor = since ? new Date(since).getTime() : 0;
       const collected: ExternalReview[] = [];
       let pageToken: string | undefined;
@@ -107,7 +125,7 @@ export function createGoogleConnector(logger: {
       do {
         const query = new URLSearchParams({ pageSize: '50', orderBy: 'updateTime desc' });
         if (pageToken) query.set('pageToken', pageToken);
-        const body = (await call(`${locationName}/reviews?${query}`)) as {
+        const body = (await call(establishmentId, `${locationName}/reviews?${query}`)) as {
           reviews?: GoogleReview[];
           nextPageToken?: string;
         };
@@ -130,8 +148,9 @@ export function createGoogleConnector(logger: {
       return collected;
     },
 
-    async fetchCounters(locationName) {
-      const body = (await call(`${locationName}/reviews?pageSize=1`)) as {
+    async fetchCounters({ establishmentId, externalId }) {
+      if (!externalId) return null;
+      const body = (await call(establishmentId, `${externalId}/reviews?pageSize=1`)) as {
         totalReviewCount?: number;
         averageRating?: number;
       };
@@ -141,13 +160,27 @@ export function createGoogleConnector(logger: {
       };
     },
 
-    async publishReply(locationName, reviewExternalId, text) {
-      await call(`${locationName}/reviews/${reviewExternalId}/reply`, {
+    async publishReply({ establishmentId, externalId }, reviewExternalId, text) {
+      if (!externalId) throw new NotConnectedError(establishmentId);
+      await call(establishmentId, `${externalId}/reviews/${reviewExternalId}/reply`, {
         method: 'PUT',
         body: JSON.stringify({ comment: text }),
       });
     },
   };
+}
+
+/**
+ * L'établissement n'a pas autorisé Avisio sur sa fiche.
+ *
+ * Erreur distincte pour que l'ingestion la traite comme un état d'onboarding
+ * — à signaler dans l'interface — et non comme une panne à alerter.
+ */
+export class NotConnectedError extends Error {
+  constructor(readonly establishmentId: string) {
+    super("Aucune autorisation Google pour cet établissement.");
+    this.name = 'NotConnectedError';
+  }
 }
 
 interface GoogleReview {

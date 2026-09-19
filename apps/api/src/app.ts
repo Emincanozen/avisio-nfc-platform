@@ -16,7 +16,7 @@ import Fastify, {
 } from 'fastify';
 import { ZodError } from 'zod';
 import type { ManagerRole, PlatformId } from '@avisio/core';
-import { env } from './env.js';
+import { capabilities, env } from './env.js';
 import type { Repository } from './repository/index.js';
 import { createLlmService, type LlmService } from './services/anthropic.js';
 import { createAnalyticsService } from './services/analytics.js';
@@ -26,6 +26,7 @@ import {
   createSimulatedConnector,
   type ReviewConnector,
 } from './services/google.js';
+import { createGoogleTokenService, type GoogleTokenService } from './services/google-tokens.js';
 import { createIngestService } from './services/ingest.js';
 import { createNotifier, type Notifier } from './services/notify.js';
 import { createPosService } from './services/pos.js';
@@ -36,6 +37,7 @@ import { registerAuthRoutes } from './routes/auth.js';
 import { registerBillingRoutes } from './routes/billing.js';
 import { registerCatalogRoutes } from './routes/catalog.js';
 import { registerIntegrationRoutes } from './routes/integrations.js';
+import { registerGoogleRoutes } from './routes/google.js';
 import { registerManagerRoutes } from './routes/manager.js';
 import { registerPublicRoutes } from './routes/public.js';
 import { registerRateLimit } from './ratelimit.js';
@@ -60,6 +62,7 @@ export interface AppContext {
   billing: ReturnType<typeof createBillingService>;
   reports: ReturnType<typeof createReportService>;
   pos: ReturnType<typeof createPosService>;
+  googleTokens: GoogleTokenService;
 }
 
 declare module 'fastify' {
@@ -79,17 +82,15 @@ declare module 'fastify' {
 }
 
 export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
-  // Options typées explicitement : `trustProxy` est une union
-  // (booléen / nombre de sauts / liste d'adresses), et la laisser inférer
-  // ferait basculer Fastify sur sa surcharge HTTP/2.
-  // Voir `env.trustProxy` : par défaut on ne croit pas X-Forwarded-For. C'est
-  // l'IP qui sert de clé à la limitation de débit — la croire sur parole
-  // reviendrait à offrir une identité neuve à chaque requête.
+  // Par défaut on ne croit pas X-Forwarded-For (voir `env.trustProxy`) :
+  // l'IP sert de clé à toute la limitation de débit, et la croire sur parole
+  // offrirait une identité neuve à chaque requête.
   //
-  // Un nombre de sauts se traduit en prédicat : Fastify ne prend pas la forme
+  // Un nombre de sauts se traduit en prédicat — Fastify ne prend pas la forme
   // numérique dans ses types, alors que c'est la configuration la plus sûre
-  // derrière un proxy (elle ne se périme pas quand l'hébergeur change ses
-  // plages d'adresses).
+  // derrière un proxy : elle ne se périme pas quand l'hébergeur change ses
+  // plages d'adresses. Les options sont typées explicitement parce que cette
+  // union ferait autrement basculer Fastify sur sa surcharge HTTP/2.
   const hops = env.trustProxy;
   const trustProxy: FastifyServerOptions['trustProxy'] =
     typeof hops === 'number' ? (_address: string, hop: number) => hop < hops : hops;
@@ -122,10 +123,26 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
   const llm = deps.llm ?? createLlmService(logger);
   const push = deps.push ?? createPushSender(deps.repo, logger);
   const notifier = deps.notifier ?? createNotifier({ repo: deps.repo, push, logger });
+  const googleTokens = createGoogleTokenService(deps.repo, logger);
+
+  /**
+   * Choix du connecteur Google.
+   *
+   * En direct dès que l'application OAuth est configurée : il se débrouille
+   * alors par établissement, et un établissement non connecté ne renvoie
+   * simplement rien. Sinon, connecteur simulé — ce qui permet de démontrer et
+   * de développer tout le pipeline sans accès partenaire, à condition que
+   * l'interface le dise, ce qu'elle fait via `/health`.
+   */
   const connectors =
     deps.connectors ??
     new Map<PlatformId, ReviewConnector>([
-      ['google', createGoogleConnector(logger)],
+      [
+        'google',
+        capabilities.googleOAuth
+          ? createGoogleConnector(logger, (id) => googleTokens.accessTokenFor(id))
+          : createSimulatedConnector('google'),
+      ],
       ['tripadvisor', createSimulatedConnector('tripadvisor')],
       ['facebook', createSimulatedConnector('facebook')],
       ['yelp', createSimulatedConnector('yelp')],
@@ -138,6 +155,7 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
     notifier,
     push,
     connectors,
+    googleTokens,
     analytics: createAnalyticsService(deps.repo),
     ingest: createIngestService({ repo: deps.repo, connectors, llm, notifier, logger }),
     billing: createBillingService({
@@ -283,6 +301,7 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
   await registerManagerRoutes(app);
   await registerBillingRoutes(app);
   await registerIntegrationRoutes(app);
+  await registerGoogleRoutes(app);
   await registerAdminRoutes(app);
 
   return app;

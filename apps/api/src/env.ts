@@ -29,10 +29,28 @@ export const env = {
   anthropicApiKey: str('ANTHROPIC_API_KEY'),
   anthropicModel: str('ANTHROPIC_MODEL', 'claude-opus-5'),
 
+  /**
+   * Clé de scellement des secrets stockés en base (jetons OAuth des clients).
+   * Vide => dérivée de `JWT_SECRET`. À séparer en production : faire tourner
+   * le secret des sessions ne doit pas rendre illisibles les jetons Google.
+   */
+  secretsKey: str('SECRETS_KEY'),
+
   google: {
     clientId: str('GOOGLE_CLIENT_ID'),
     clientSecret: str('GOOGLE_CLIENT_SECRET'),
+    /**
+     * Jeton de rafraîchissement global — hérité, et conservé uniquement comme
+     * solution de repli pour un déploiement mono-établissement.
+     *
+     * Le chemin normal est le consentement par établissement : le propriétaire
+     * de la fiche autorise Avisio sur SA fiche, et c'est son jeton qui est
+     * utilisé pour elle. Un jeton unique pour tout le parc ne peut pas exister
+     * chez Google — personne ne peut consentir à la place d'un autre.
+     */
     refreshToken: str('GOOGLE_REFRESH_TOKEN'),
+    /** URL de retour déclarée dans la console Google Cloud. */
+    redirectUri: str('GOOGLE_REDIRECT_URI'),
   },
 
   resendApiKey: str('RESEND_API_KEY'),
@@ -88,7 +106,17 @@ export const capabilities = {
   persistence: env.databaseUrl.length > 0,
   /** false => analyse et réponses produites par le moteur heuristique local. */
   llm: env.anthropicApiKey.length > 0,
-  /** false => connecteur Google simulé (avis générés, cadence réelle). */
+  /**
+   * L'application OAuth Google est-elle configurée ?
+   *
+   * C'est la condition du parcours de consentement par établissement : sans
+   * identifiants d'application, aucun client ne peut autoriser sa fiche.
+   * L'accès API approuvé par Google, lui, ne se lit pas dans la configuration
+   * — il se constate au premier appel, un projet non approuvé ayant un quota
+   * de 0 requête/minute.
+   */
+  googleOAuth: Boolean(env.google.clientId && env.google.clientSecret),
+  /** Repli mono-établissement hérité : jeton de rafraîchissement global. */
   googleReviews: Boolean(env.google.clientId && env.google.refreshToken),
   /** false => emails journalisés en console. */
   email: env.resendApiKey.length > 0,

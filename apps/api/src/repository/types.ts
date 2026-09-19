@@ -75,6 +75,35 @@ export interface PosCredentialRecord {
   lastUsedAt?: string;
 }
 
+/**
+ * Autorisation Google accordée par le propriétaire d'une fiche.
+ *
+ * Une ligne par établissement : la fiche appartient au client, pas à Avisio,
+ * et c'est son consentement qui est stocké — scellé, jamais en clair.
+ */
+export interface GoogleConnectionRecord {
+  establishmentId: string;
+  /** Jeton de rafraîchissement scellé (voir `services/secrets.ts`). */
+  refreshTokenSealed: string;
+  /** Portées réellement accordées, telles que Google les a renvoyées. */
+  scope: string;
+  /** Fiche sélectionnée : `locations/123…`. Nul tant que le client n'a pas choisi. */
+  locationName?: string;
+  locationTitle?: string;
+  connectedAt: string;
+  /** Compte ayant donné l'autorisation, pour que le client s'y reconnaisse. */
+  authorizedBy?: string;
+  lastSyncAt?: string;
+  /**
+   * Dernière erreur rencontrée par la synchronisation.
+   *
+   * Conservée pour que l'interface puisse dire au client que sa connexion est
+   * rompue. Une connexion qui échoue en silence est pire que pas de connexion :
+   * il croit être couvert alors qu'il ne l'est plus.
+   */
+  lastError?: string;
+}
+
 export interface Repository {
   readonly kind: 'memory' | 'prisma';
 
@@ -210,6 +239,21 @@ export interface Repository {
     getCredential(establishmentId: string): Promise<PosCredentialRecord | null>;
     upsertCredential(credential: PosCredentialRecord): Promise<PosCredentialRecord>;
     touchCredential(establishmentId: string, at: string): Promise<void>;
+  };
+
+  // -------------------------------------------------------------------------
+  // Connexion Google par établissement
+  // -------------------------------------------------------------------------
+
+  googleConnections: {
+    get(establishmentId: string): Promise<GoogleConnectionRecord | null>;
+    upsert(record: GoogleConnectionRecord): Promise<GoogleConnectionRecord>;
+    update(
+      establishmentId: string,
+      patch: Partial<GoogleConnectionRecord>,
+    ): Promise<GoogleConnectionRecord>;
+    remove(establishmentId: string): Promise<void>;
+    listAll(): Promise<GoogleConnectionRecord[]>;
   };
 
   // -------------------------------------------------------------------------

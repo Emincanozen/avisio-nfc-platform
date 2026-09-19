@@ -23,6 +23,7 @@ import {
 } from '@avisio/core';
 import { buildDemoDataset } from '../demo-data.js';
 import type {
+  GoogleConnectionRecord,
   PendingPushRecord,
   PosCredentialRecord,
   PosTicketRecord,
@@ -50,6 +51,7 @@ export function createMemoryRepository(options: { seed?: boolean } = {}): Reposi
   const preferences = new Map<string, NotificationPreferences>();
   const posTickets = new Map<string, PosTicketRecord>(); // clé: estId:externalId
   const posCredentials = new Map<string, PosCredentialRecord>();
+  const googleConnections = new Map<string, GoogleConnectionRecord>();
   const rateCounters = new Map<string, { count: number; expiresAtMs: number }>();
 
   // Les identifiants générés à l'exécution doivent rester hors de portée de
@@ -435,6 +437,29 @@ export function createMemoryRepository(options: { seed?: boolean } = {}): Reposi
       async touchCredential(establishmentId, at) {
         const current = posCredentials.get(establishmentId);
         if (current) posCredentials.set(establishmentId, { ...current, lastUsedAt: at });
+      },
+    },
+
+    googleConnections: {
+      async get(establishmentId) {
+        return googleConnections.get(establishmentId) ?? null;
+      },
+      async upsert(record) {
+        googleConnections.set(record.establishmentId, record);
+        return record;
+      },
+      async update(establishmentId, patch) {
+        const current = googleConnections.get(establishmentId);
+        if (!current) throw new Error(`Aucune connexion Google sur ${establishmentId}`);
+        const next = { ...current, ...patch, establishmentId };
+        googleConnections.set(establishmentId, next);
+        return next;
+      },
+      async remove(establishmentId) {
+        googleConnections.delete(establishmentId);
+      },
+      async listAll() {
+        return [...googleConnections.values()];
       },
     },
 

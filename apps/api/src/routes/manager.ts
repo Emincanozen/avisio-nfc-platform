@@ -208,7 +208,7 @@ export async function registerManagerRoutes(app: FastifyInstance): Promise<void>
     if (connector && link) {
       try {
         await connector.publishReply(
-          link.externalId ?? review.establishmentId,
+          { establishmentId: review.establishmentId, externalId: link.externalId ?? null },
           review.externalId,
           text,
         );
