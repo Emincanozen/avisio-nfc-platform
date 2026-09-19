@@ -4,7 +4,7 @@ Mémoire structurée et durable, destinée à toute intelligence artificielle
 reprenant Avisio. Ce n'est pas une transcription de conversations : c'est
 l'état, les décisions et ce qui reste.
 
-**Dernière mise à jour : 19 septembre 2026, commit `07c21b7`.**
+**Dernière mise à jour : 19 septembre 2026, commit `a31fc16`.**
 
 ---
 
@@ -56,7 +56,7 @@ l'argumentaire commercial.
 
 | Indicateur | Valeur | Commande |
 |---|---|---|
-| Tests | 313, tous verts | `npm test` |
+| Tests | 317, tous verts | `npm test` |
 | Typecheck | passe, `src` + `test` + `scripts` | `npm run typecheck` |
 | Build de production | passe | `npm run build` |
 | Bout en bout sur PostgreSQL | 54 / 54 | `node scripts/smoke-test.mjs` |
@@ -233,6 +233,18 @@ Google n'a pas approuvé l'accès — et il restera utile pour les plateformes
 sans API ouverte. La distinction interdit qu'un chiffre du tableau de bord
 laisse croire à une connexion en direct qui n'existe pas.
 
+### D12 — Une connexion réussie remet le compteur à zéro
+
+*Pourquoi* : le budget de connexion existe pour ralentir qui devine un mot de
+passe. Un mot de passe correct est la démonstration du contraire. Sans cette
+remise à zéro, un gérant se verrouille sur ses propres succès — téléphone,
+ordinateur, tablette, gestionnaire de mots de passe.
+
+*Ce que cela n'ouvre pas* : un attaquant capable de se connecter n'a plus rien
+à deviner.
+
+*Découvert* en exécutant le test de bout en bout quatre fois de suite.
+
 ### D11 — Analyseur CSV écrit à la main
 
 *Pourquoi* : les exports de plateformes contiennent des commentaires à
@@ -285,6 +297,14 @@ cycle complet d'une connexion Google, colonne de provenance. Autotest de
 notification rendu déterministe — il supposait un jeu de démonstration neuf et
 annonçait une panne inexistante sur une base plus fournie, ce qui est le pire
 défaut possible pour un autotest.
+
+**`3d1fc97` · `a31fc16` — Défauts trouvés en exploitant le produit.**
+Trois défauts de la limitation de débit, invisibles pour la suite de tests et
+apparus en lançant les scripts de vérification comme un exploitant le ferait,
+plusieurs fois dans la même heure : une connexion réussie consommait le budget
+du compte (verrouillage sur ses propres succès), le budget des traitements de
+fond était trop serré pour une séance de support, et le test de bout en bout
+verrouillait le compte dont il avait besoin. Voir D12.
 
 ### Sessions précédentes
 
