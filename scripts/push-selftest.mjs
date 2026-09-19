@@ -211,34 +211,52 @@ const countAlerts = async (establishmentId) => {
   return Array.isArray(body) ? body.length : 0;
 };
 
-const ESTABLISHMENTS = ['est_comptoir', 'est_atelier', 'est_hotel'];
-const alertsBefore = Object.fromEntries(
-  await Promise.all(ESTABLISHMENTS.map(async (id) => [id, await countAlerts(id)])),
-);
+/**
+ * L'avis négatif est injecté, pas attendu.
+ *
+ * La version précédente déclenchait des cycles d'ingestion jusqu'à ce que le
+ * connecteur simulé veuille bien produire un avis négatif. Deux défauts : le
+ * résultat dépendait du hasard, et sur une base comptant plus que les trois
+ * établissements de démonstration, l'alerte tombait sur n'importe lequel —
+ * donc pas sur celui dont ce script surveille le gérant. Le test échouait
+ * alors en annonçant une panne qui n'existait pas.
+ *
+ * L'import d'un avis réel est déterministe, vise l'établissement voulu, et
+ * exerce le même chemin d'alerte et de notification.
+ */
+const TARGET = 'est_comptoir';
+const alertsBefore = await countAlerts(TARGET);
 const pushesBefore = received.length;
 
-// Le connecteur simulé ne produit pas un avis négatif à tous les coups : on
-// déclenche des cycles d'ingestion jusqu'à ce qu'une alerte parte.
-let cycles = 0;
-let alerted = false;
-while (cycles < 25 && !alerted) {
-  cycles += 1;
-  const { body } = await call('/admin/ops/ingest', { method: 'POST', headers: adminHeader });
-  if ((body?.alertsCreated ?? 0) > 0) alerted = true;
+const today = new Date().toISOString().slice(0, 10);
+const externalId = `selftest-${Date.now()}`;
+const csv = [
+  'externalId,author,rating,comment,publishedAt,replyText',
+  `${externalId},Autotest,1,"Service catastrophique, attente interminable et personne pour nous renseigner.",${today},`,
+].join('\n');
+
+const imported = await call(`/establishments/${TARGET}/reviews/import`, {
+  method: 'POST',
+  headers: { ...authHeader, 'content-type': 'application/json' },
+  body: JSON.stringify({ platform: 'google', csv }),
+});
+if (imported.status !== 200) {
+  console.log(`  (import refusé : ${imported.status} — ${imported.body?.error ?? 'sans motif'})`);
 }
+
+// Laisse le temps à la notification de partir : elle suit la création de
+// l'alerte, elle ne la précède pas.
 await new Promise((resolve) => setTimeout(resolve, 1500));
 
-const alertsAfter = Object.fromEntries(
-  await Promise.all(ESTABLISHMENTS.map(async (id) => [id, await countAlerts(id)])),
-);
-const newAlerts = ESTABLISHMENTS.reduce(
-  (total, id) => total + (alertsAfter[id] - alertsBefore[id]),
-  0,
-);
+const newAlerts = (await countAlerts(TARGET)) - alertsBefore;
 const newPushes = received.length - pushesBefore;
 
 const scenario = [
-  [`Avis négatif détecté et alerte créée (${cycles} cycle(s) d'ingestion)`, newAlerts > 0],
+  ["Avis négatif ingéré et analysé", (imported.body?.summary?.imported ?? 0) === 1],
+  [
+    `Alerte créée sur l'établissement visé`,
+    newAlerts > 0 && (imported.body?.alertsCreated ?? 0) > 0,
+  ],
   [`Notification poussée sur l'appareil du gérant`, newPushes > 0],
 ];
 for (const [label, ok] of scenario) console.log(`  ${ok ? 'OK  ' : 'KO  '} ${label}`);
@@ -250,8 +268,13 @@ if (failures.length === 0) {
   console.log(
     'VERDICT : la chaîne fonctionne. Un avis négatif entrant crée une alerte et\n' +
       "notifie le gérant sur son appareil.\n\n" +
-      "Réserve : l'avis provient ici du connecteur simulé. En production, il faut\n" +
-      "l'accès à l'API Google Business Profile pour que de vrais avis entrent.",
+      "Portée exacte : l'avis est entré par l'import manuel, qui est un chemin de\n" +
+      "production. Ce qui est prouvé va donc de l'entrée d'un avis jusqu'à la\n" +
+      "notification chiffrée, sans simulation.\n\n" +
+      "Ce qui ne l'est pas : la synchronisation automatique depuis Google, qui\n" +
+      "attend l'accès à l'API Business Profile (voir docs/google.md), et la\n" +
+      'livraison par le service de push de Google ou Mozilla, qui demande un vrai\n' +
+      'appareil et un domaine en HTTPS.',
   );
 } else {
   console.log(`VERDICT : ${failures.length} vérification(s) en échec.`);

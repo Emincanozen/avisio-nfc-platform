@@ -284,6 +284,24 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
 
     const status = err.statusCode ?? 500;
     if (status >= 500) request.log.error({ err: error }, 'Erreur non gérée');
+
+    // Un refus de débit levé depuis une route (limite par compte) doit être
+    // aussi exploitable que celui du crochet global : même code machine, même
+    // en-tête. Sans quoi le client doit deviner quand réessayer selon la
+    // limite qui l'a arrêté, ce qu'il ne peut pas savoir.
+    if (status === 429) {
+      const retryAfterSeconds = (error as { retryAfterSeconds?: number }).retryAfterSeconds;
+      if (retryAfterSeconds != null) {
+        void reply.header('retry-after', String(retryAfterSeconds));
+      }
+      void reply.code(429).send({
+        error: err.message ?? 'Trop de requêtes.',
+        code: 'rate_limited',
+        ...(retryAfterSeconds != null ? { retryAfterSeconds } : {}),
+      });
+      return;
+    }
+
     void reply.code(status).send({
       error: status >= 500 ? 'Erreur interne.' : (err.message ?? 'Requête invalide.'),
     });

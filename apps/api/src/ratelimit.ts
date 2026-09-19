@@ -96,10 +96,15 @@ export async function consumeRate(
   const verdict = rateVerdict(count, rule, nowMs);
   if (verdict.allowed) return;
 
+  // L'erreur porte le délai : le gestionnaire d'erreurs en fait un en-tête
+  // `retry-after` et un code machine, exactement comme le crochet global. Un
+  // client ne devrait pas avoir à deviner laquelle des deux limites l'a
+  // arrêté pour savoir quand réessayer.
   const error = new Error(
     `Trop de tentatives. Réessayez dans ${verdict.retryAfterSeconds} seconde(s).`,
-  ) as Error & { statusCode: number };
+  ) as Error & { statusCode: number; retryAfterSeconds: number };
   error.statusCode = 429;
+  error.retryAfterSeconds = verdict.retryAfterSeconds;
   throw error;
 }
 

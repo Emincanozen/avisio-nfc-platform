@@ -90,6 +90,29 @@ describe('connexion', () => {
     expect(codes.slice(budget)).toEqual([429, 429, 429]);
   });
 
+  it('rend le refus par compte aussi exploitable que celui par adresse', async () => {
+    const instance = await freshApp();
+    for (let i = 0; i < RATE_RULES.login.limit; i += 1) {
+      await instance.inject({
+        method: 'POST',
+        url: '/auth/login',
+        payload: { email: DEMO_CREDENTIALS.email, password: 'mot-de-passe-faux' },
+      });
+    }
+
+    // Le client ne peut pas savoir laquelle des deux limites l'a arrete : les
+    // deux refus doivent donc porter le meme code machine et le meme en-tete.
+    const res = await instance.inject({
+      method: 'POST',
+      url: '/auth/login',
+      payload: { email: DEMO_CREDENTIALS.email, password: 'mot-de-passe-faux' },
+    });
+    expect(res.statusCode).toBe(429);
+    expect(res.json().code).toBe('rate_limited');
+    expect(Number(res.headers['retry-after'])).toBeGreaterThan(0);
+    expect(res.json().retryAfterSeconds).toBeGreaterThan(0);
+  });
+
   it('refuse même le bon mot de passe une fois le budget du compte épuisé', async () => {
     const instance = await freshApp();
 
