@@ -108,6 +108,27 @@ export async function consumeRate(
   throw error;
 }
 
+/**
+ * Efface le budget d'une identité.
+ *
+ * Appelée après une connexion réussie. Sans elle, dix connexions **justes**
+ * en quinze minutes verrouilleraient le compte — ce qui n'a aucun sens : le
+ * budget existe pour ralentir qui devine un mot de passe, et un mot de passe
+ * correct est la démonstration du contraire.
+ *
+ * Cela n'ouvre rien : un attaquant capable de se connecter n'a plus besoin de
+ * deviner quoi que ce soit.
+ */
+export async function clearRate(
+  app: FastifyInstance,
+  scope: RateScope,
+  identity: string,
+): Promise<void> {
+  const rule = RATE_RULES[scope];
+  const start = windowStartMs(Date.now(), rule.windowSeconds);
+  await app.ctx.repo.rateLimit.reset(rateKey(scope, identity, start)).catch(() => undefined);
+}
+
 export function registerRateLimit(app: FastifyInstance): void {
   const { repo } = app.ctx;
 

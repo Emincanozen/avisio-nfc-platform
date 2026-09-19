@@ -156,6 +156,53 @@ describe('connexion', () => {
     expect(res.statusCode).toBe(200);
   });
 
+  it('ne verrouille pas un compte sur ses propres connexions réussies', async () => {
+    const instance = await freshApp();
+
+    // Un gérant se connecte sur son téléphone, son ordinateur, sa tablette,
+    // puis son gestionnaire de mots de passe rejoue la session. Aucune de ces
+    // connexions n'est une tentative de deviner quoi que ce soit : le budget
+    // n'a pas à s'épuiser dessus.
+    for (let i = 0; i < RATE_RULES.login.limit + 5; i += 1) {
+      const res = await instance.inject({
+        method: 'POST',
+        url: '/auth/login',
+        payload: DEMO_CREDENTIALS,
+      });
+      expect(res.statusCode, `connexion n°${i + 1}`).toBe(200);
+    }
+  });
+
+  it('remet le compteur à zéro dès que le bon mot de passe est donné', async () => {
+    const instance = await freshApp();
+
+    // Neuf échecs, puis un succès : le budget repart entier. Cela n'ouvre
+    // rien — qui sait déjà se connecter n'a plus rien à deviner.
+    for (let i = 0; i < RATE_RULES.login.limit - 1; i += 1) {
+      await instance.inject({
+        method: 'POST',
+        url: '/auth/login',
+        payload: { email: DEMO_CREDENTIALS.email, password: 'mot-de-passe-faux' },
+      });
+    }
+    expect(
+      (
+        await instance.inject({
+          method: 'POST',
+          url: '/auth/login',
+          payload: DEMO_CREDENTIALS,
+        })
+      ).statusCode,
+    ).toBe(200);
+
+    const apres = await instance.inject({
+      method: 'POST',
+      url: '/auth/login',
+      payload: { email: DEMO_CREDENTIALS.email, password: 'mot-de-passe-faux' },
+    });
+    expect(apres.statusCode).toBe(401);
+  });
+
   it("laisse la validation passer devant le budget du compte", async () => {
     const instance = await freshApp();
 
@@ -265,6 +312,51 @@ describe('parcours public', () => {
 
     const res = await instance.inject({ method: 'GET', url: '/health' });
     expect(res.statusCode).toBe(200);
+  });
+});
+
+describe('exploitation', () => {
+  it('laisse passer une séance de support complète', async () => {
+    const instance = await freshApp();
+    const admin = await instance.inject({
+      method: 'POST',
+      url: '/auth/login',
+      payload: { email: 'admin@avisio.fr', password: 'admin1234' },
+    });
+    const headers = { authorization: `Bearer ${admin.json().token}` };
+
+    // Diagnostiquer un client demande d'enchaîner plusieurs traitements, et
+    // de recommencer après correction. Le budget initial (10 / h) épuisait
+    // déjà le quota au deuxième passage du test de bout en bout, qui en
+    // déclenche six : un exploitant l'aurait rencontré tous les jours.
+    const jobs = ['ingest', 'trends', 'billing', 'dunning', 'reports', 'push'];
+    for (let tour = 0; tour < 3; tour += 1) {
+      for (const job of jobs) {
+        const res = await instance.inject({
+          method: 'POST',
+          url: `/admin/ops/${job}`,
+          headers,
+        });
+        expect(res.statusCode, `${job}, tour ${tour + 1}`).toBe(200);
+      }
+    }
+  });
+
+  it("coupe malgré tout un script qui s'emballe", async () => {
+    const instance = await freshApp();
+    const admin = await instance.inject({
+      method: 'POST',
+      url: '/auth/login',
+      payload: { email: 'admin@avisio.fr', password: 'admin1234' },
+    });
+    const headers = { authorization: `Bearer ${admin.json().token}` };
+
+    let last = 0;
+    for (let i = 0; i < RATE_RULES.ops.limit + 1; i += 1) {
+      last = (await instance.inject({ method: 'POST', url: '/admin/ops/push', headers }))
+        .statusCode;
+    }
+    expect(last).toBe(429);
   });
 });
 

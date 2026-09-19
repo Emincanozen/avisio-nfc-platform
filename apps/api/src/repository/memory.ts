@@ -479,6 +479,9 @@ export function createMemoryRepository(options: { seed?: boolean } = {}): Reposi
         rateCounters.set(key, { count, expiresAtMs: new Date(expiresAt).getTime() });
         return count;
       },
+      async reset(key) {
+        rateCounters.delete(key);
+      },
     },
 
     async close() {

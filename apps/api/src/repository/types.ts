@@ -287,6 +287,16 @@ export interface Repository {
      * fenêtre écoulée n'ayant plus aucune valeur.
      */
     hit(key: string, expiresAt: string): Promise<number>;
+    /**
+     * Efface un compteur.
+     *
+     * Sert au seul cas où l'événement compté prouve qu'il n'était pas un
+     * abus : une connexion réussie. Le budget de connexion existe pour
+     * ralentir qui devine un mot de passe ; un mot de passe correct est la
+     * démonstration du contraire, et laisser le compteur courir verrouillerait
+     * un utilisateur légitime sur ses propres succès.
+     */
+    reset(key: string): Promise<void>;
   };
 
   close(): Promise<void>;

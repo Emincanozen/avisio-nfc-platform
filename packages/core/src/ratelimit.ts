@@ -94,7 +94,23 @@ export const RATE_RULES: Record<RateScope, RateRule> = {
   // couvre largement une journée de réponses aux avis.
   llm: { limit: 30, windowSeconds: 3600 },
 
-  ops: { limit: 10, windowSeconds: 3600 },
+  /**
+   * Déclenchements manuels des traitements de fond.
+   *
+   * Réservés aux comptes administrateurs : la menace n'est pas un inconnu,
+   * c'est un double clic ou un script qui s'emballe. Un par minute en régime
+   * soutenu couvre largement une séance de support — diagnostiquer un client
+   * demande d'enchaîner ingestion, tendances et facturation, plusieurs fois.
+   *
+   * Le budget était à 10 par heure. C'était trop serré, et le défaut s'est vu
+   * en exécutant le test de bout en bout deux fois dans la même heure : il
+   * déclenche six traitements à lui seul, et le second passage échouait en
+   * 429. Un exploitant aurait rencontré cela tous les jours.
+   *
+   * Ce n'est pas ce budget qui protège la dépense : le plafond d'appels au
+   * modèle de langage s'en charge, sur des données vérifiées.
+   */
+  ops: { limit: 60, windowSeconds: 3600 },
 
   authenticated: { limit: 600, windowSeconds: 60 },
 };

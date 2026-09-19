@@ -89,7 +89,7 @@ pas une adresse.
 | `public_read` | 300 / min | La bande passante |
 | `pos` | 600 / min | Large : une caisse légitime est bavarde |
 | `llm` | 30 / h | La dépense de modèle de langage |
-| `ops` | 10 / h | Les déclenchements manuels répétés |
+| `ops` | 60 / h | Le double clic et le script emballé. Réservé aux admins : ce n'est pas ce budget qui protège la dépense, mais le plafond d'appels au modèle |
 | `authenticated` | 600 / min | Tout le reste |
 
 Deux décisions à connaître :

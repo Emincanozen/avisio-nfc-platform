@@ -9,7 +9,7 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { httpError } from '../app.js';
 import { verifyPassword } from '../auth.js';
-import { consumeRate } from '../ratelimit.js';
+import { clearRate, consumeRate } from '../ratelimit.js';
 
 export async function registerAuthRoutes(app: FastifyInstance): Promise<void> {
   const { repo } = app.ctx;
@@ -31,6 +31,12 @@ export async function registerAuthRoutes(app: FastifyInstance): Promise<void> {
     const invalid = httpError(401, 'Identifiants incorrects.');
     if (!manager) throw invalid;
     if (!verifyPassword(body.password, manager.passwordHash)) throw invalid;
+
+    // Le mot de passe est bon : le compteur d'essais n'a plus lieu d'être.
+    // Sans cette remise à zéro, un gérant qui se connecte sur son téléphone,
+    // son ordinateur et sa tablette, puis relance son gestionnaire de mots de
+    // passe, finirait par se verrouiller lui-même sur ses propres succès.
+    await clearRate(app, 'login', body.email.toLowerCase());
 
     const token = app.jwt.sign({
       sub: manager.id,

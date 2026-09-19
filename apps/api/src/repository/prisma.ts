@@ -749,6 +749,9 @@ export async function createPrismaRepository(): Promise<Repository> {
         }
         return count;
       },
+      async reset(key) {
+        await db.rateCounter.deleteMany({ where: { key } });
+      },
     },
 
     async close() {

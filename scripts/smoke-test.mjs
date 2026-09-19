@@ -73,11 +73,34 @@ check('connexion exploitant', admin.status === 200);
 check('rôle admin', admin.body?.manager?.role === 'admin');
 const adminToken = admin.body?.token;
 
+/**
+ * Adresse unique à chaque passage, et non celle du compte de démonstration.
+ *
+ * La limitation de débit verrouille un compte au bout de dix tentatives
+ * ratées — c'est son travail. En tapant sur `demo@avisio.fr`, ce contrôle
+ * finissait par verrouiller le compte dont tout le reste du test a besoin :
+ * le passage suivant échouait partout, et le symptôme désignait n'importe
+ * quoi sauf la cause.
+ *
+ * Une adresse inexistante prouve exactement la même chose — le refus en 401
+ * sans révéler si le compte existe — sans effet de bord.
+ */
 const wrong = await call('/auth/login', {
   method: 'POST',
-  body: { email: 'demo@avisio.fr', password: 'faux12345678' },
+  body: { email: `inconnu-${Date.now()}@controle.test`, password: 'faux12345678' },
 });
 check('mot de passe invalide rejeté en 401', wrong.status === 401, `reçu ${wrong.status}`);
+
+// Sans jeton, tout ce qui suit échouerait en cascade et le rapport final
+// désignerait vingt défauts là où il n'y en a qu'un.
+if (!ownerToken || !adminToken) {
+  console.log('\nArrêt : impossible d’obtenir un jeton de session.');
+  console.log(`  gérant : ${owner.status} · exploitant : ${admin.status}`);
+  if (owner.status === 429 || admin.status === 429) {
+    console.log('  Cause probable : budget de connexion épuisé. Réessayez dans 15 minutes.');
+  }
+  process.exit(1);
+}
 
 section('Cloisonnement');
 check(
@@ -146,6 +169,34 @@ check(
 );
 
 section('Avis et réponses');
+
+/**
+ * Le test fournit lui-même l'avis qu'il va traiter.
+ *
+ * Il se contentait de chercher un avis négatif non traité dans le jeu de
+ * données. Chaque passage en consomme un : le deuxième passage dans la même
+ * base échouait donc en annonçant un défaut inexistant. Un test de
+ * vérification qui dépend de l'état laissé par le précédent ne vérifie pas
+ * grand-chose, et son échec fait chercher la panne au mauvais endroit.
+ */
+const besoin = await call('/establishments/est_hotel/reviews?maxRating=3&status=new&limit=1', {
+  token: ownerToken,
+});
+if (!besoin.body?.[0]) {
+  const aujourdhui = new Date().toISOString().slice(0, 10);
+  await call('/establishments/est_hotel/reviews/import', {
+    method: 'POST',
+    token: ownerToken,
+    body: {
+      platform: 'google',
+      csv: [
+        'externalId,author,rating,comment,publishedAt',
+        `smoke-${Date.now()},Contrôle,2,"Chambre bruyante et accueil expéditif.",${aujourdhui}`,
+      ].join('\n'),
+    },
+  });
+}
+
 const negatives = await call('/establishments/est_hotel/reviews?maxRating=3&status=new&limit=1', {
   token: ownerToken,
 });
@@ -225,12 +276,21 @@ check(
 );
 
 const parc = await call('/admin/establishments', { token: adminToken });
-check('parc listé avec MRR', parc.status === 200 && parc.body?.every((r) => r.mrrCents > 0));
+check(
+  'parc listé avec MRR',
+  parc.status === 200 && Array.isArray(parc.body) && parc.body.every((r) => r.mrrCents > 0),
+);
 
 const adminInvoices = await call('/admin/invoices', { token: adminToken });
-check('factures consolidées', adminInvoices.status === 200 && adminInvoices.body?.length > 0);
+check(
+  'factures consolidées',
+  adminInvoices.status === 200 && Array.isArray(adminInvoices.body) && adminInvoices.body.length > 0,
+);
 
-const numbers = (adminInvoices.body ?? [])
+// `Array.isArray` plutôt qu'un simple `?? []` : une réponse d'erreur est un
+// objet, et `.map` dessus faisait tomber le script d'un coup — on perdait
+// alors tous les contrôles restants, y compris ceux qui auraient réussi.
+const numbers = (Array.isArray(adminInvoices.body) ? adminInvoices.body : [])
   .map((i) => Number(String(i.number).slice(-6)))
   .sort((a, b) => a - b);
 const gapless = numbers.every((n, i) => i === 0 || n === numbers[i - 1] + 1);
