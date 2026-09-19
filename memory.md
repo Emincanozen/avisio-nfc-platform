@@ -4,7 +4,7 @@ Mémoire structurée et durable, destinée à toute intelligence artificielle
 reprenant Avisio. Ce n'est pas une transcription de conversations : c'est
 l'état, les décisions et ce qui reste.
 
-**Dernière mise à jour : 19 septembre 2026, commit `939888a`.**
+**Dernière mise à jour : 19 septembre 2026, commit `07c21b7`.**
 
 ---
 
@@ -56,7 +56,7 @@ l'argumentaire commercial.
 
 | Indicateur | Valeur | Commande |
 |---|---|---|
-| Tests | 306, tous verts | `npm test` |
+| Tests | 313, tous verts | `npm test` |
 | Typecheck | passe, `src` + `test` + `scripts` | `npm run typecheck` |
 | Build de production | passe | `npm run build` |
 | Bout en bout sur PostgreSQL | 54 / 54 | `node scripts/smoke-test.mjs` |
@@ -264,6 +264,19 @@ consigne rappelée après la donnée. Plafond de dépense et délai de garde.
 `/health` interroge réellement la base et répond 503 sinon. Correction d'un
 gaspillage de quota d'API tierce (`lastReviewDate` non filtré par plateforme).
 7 tests.
+
+**`45cb760` — Documentation d'exploitation, intégration continue, mémoire.**
+CLAUDE.md, cloud.md, memory.md, docs/deploiement.md, docs/securite.md,
+`.github/workflows/ci.yml`, `scripts/check-secrets.sh`. Ce dernier fouille
+aussi l'historique Git : un `.gitignore` ne protège que l'avenir.
+
+**`07c21b7` — Écriture française des nombres.**
+Une alerte de tendance affichait « 1.4/5 » à côté d'indicateurs écrits
+« 3,62 ». Troisième occurrence de la même famille de défaut. Un test parcourt
+maintenant les sources et échoue si `toFixed` apparaît dans du texte destiné à
+un francophone ; vérifié qu'il échoue réellement sur une violation. La
+consommation du modèle de langage est passée dans l'interface du back-office,
+la documentation affirmant à tort qu'elle y était déjà.
 
 **`939888a` — Vérification sur PostgreSQL.**
 Le code Prisma des deux commits précédents n'avait jamais tourné.
