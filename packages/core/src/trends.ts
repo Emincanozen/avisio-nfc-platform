@@ -16,6 +16,7 @@
  * qui démarre.
  */
 
+import { fr } from './format.js';
 import type { Review, ThemeId } from './types.js';
 import { THEME_LABELS } from './nlp.js';
 
@@ -121,9 +122,9 @@ function buildMessage(
 ): string {
   const label = THEME_LABELS[theme].toLowerCase();
   if (averageRating <= 3.5) {
-    return `${mentions} avis des ${days} derniers jours citent « ${label} » avec une note moyenne de ${averageRating.toFixed(1)}/5. Le sujet monte nettement par rapport aux semaines précédentes.`;
+    return `${mentions} avis des ${days} derniers jours citent « ${label} » avec une note moyenne de ${fr(averageRating, 1)}/5. Le sujet monte nettement par rapport aux semaines précédentes.`;
   }
-  return `« ${label} » revient dans ${mentions} avis sur ${days} jours, avec une note moyenne favorable (${averageRating.toFixed(1)}/5) : un point fort à mettre en avant.`;
+  return `« ${label} » revient dans ${mentions} avis sur ${days} jours, avec une note moyenne favorable (${fr(averageRating, 1)}/5) : un point fort à mettre en avant.`;
 }
 
 function countThemes(reviews: Review[]): Map<ThemeId, number> {

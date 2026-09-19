@@ -13,6 +13,8 @@
  * atteindre le seuil : commune -> département -> national.
  */
 
+import { fr } from './format.js';
+
 export const MIN_PEERS = 5;
 
 export interface PeerSnapshot {
@@ -115,9 +117,9 @@ function buildSummary(
     Math.abs(delta) < 0.05
       ? 'au niveau de'
       : delta > 0
-        ? `${delta.toFixed(2)} point au-dessus de`
-        : `${Math.abs(delta).toFixed(2)} point en dessous de`;
-  return `Comparé à ${peerCount} établissements du même secteur ${where}, vous êtes ${position} la médiane (${peerMedian.toFixed(2)}/5) et dans le ${ordinal(Math.round(percentileRank))} centile.`;
+        ? `${fr(delta)} point au-dessus de`
+        : `${fr(Math.abs(delta))} point en dessous de`;
+  return `Comparé à ${peerCount} établissements du même secteur ${where}, vous êtes ${position} la médiane (${fr(peerMedian)}/5) et dans le ${ordinal(Math.round(percentileRank))} centile.`;
 }
 
 const isSameCategory = (a: PeerSnapshot, b: PeerSnapshot): boolean =>

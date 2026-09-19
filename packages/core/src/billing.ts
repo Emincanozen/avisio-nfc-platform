@@ -12,6 +12,7 @@
  * Tous les montants sont en centimes d'euro HT, comme dans `pricing.ts`.
  */
 
+import { fr } from './format.js';
 import { VAT_RATE, quote, type QuoteLine } from './pricing.js';
 import type { AddonId, PlanId } from './types.js';
 
@@ -333,7 +334,7 @@ export function dunningAction(invoice: Invoice, now: string): DunningAction {
   const amount = (invoice.totalCents / 100).toFixed(2).replace('.', ',');
   const bodies: Record<1 | 2 | 3, string> = {
     1: `La facture ${invoice.number} de ${amount} € TTC est arrivée à échéance. Si le règlement est déjà parti, merci de ne pas tenir compte de ce message.`,
-    2: `La facture ${invoice.number} de ${amount} € TTC reste impayée depuis ${overdueDays} jours. Des pénalités de retard au taux de ${(LATE_PENALTY_RATE * 100).toFixed(2)} % courent à compter de l'échéance.`,
+    2: `La facture ${invoice.number} de ${amount} € TTC reste impayée depuis ${overdueDays} jours. Des pénalités de retard au taux de ${fr(LATE_PENALTY_RATE * 100)} % courent à compter de l'échéance.`,
     3: `Dernier rappel avant suspension : la facture ${invoice.number} de ${amount} € TTC est impayée depuis ${overdueDays} jours. Sans règlement sous 15 jours, l'accès au tableau de bord et aux alertes sera suspendu. Les plaquettes NFC de vos clients continueront de fonctionner.`,
   };
 

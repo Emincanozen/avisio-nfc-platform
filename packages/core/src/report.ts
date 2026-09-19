@@ -10,6 +10,7 @@
  * même chose.
  */
 
+import { fr } from './format.js';
 import { THEME_LABELS } from './nlp.js';
 import type { ThemeId } from './types.js';
 
@@ -231,8 +232,6 @@ const labelOf = (kind: ReportHighlight['kind']): string =>
   kind === 'win' ? 'Point fort' : kind === 'watch' ? 'À surveiller' : 'À faire';
 
 /** Nombre en écriture française : virgule décimale. */
-export const fr = (value: number, digits = 2): string =>
-  value.toLocaleString('fr-FR', { minimumFractionDigits: digits, maximumFractionDigits: digits });
 
 export const formatDelta = (delta: number | null): string => {
   if (delta == null) return 'premier mois de suivi';

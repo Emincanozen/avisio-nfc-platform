@@ -17,7 +17,18 @@ interface AdminOverview {
   signupsThisMonth: number;
   churn: { churned: number; atStart: number; rate: number };
   reviewsTotal: number;
+  importedReviews: number;
   unansweredNegatives: number;
+  googleConnections: number;
+  /** Consommation du modèle de langage sur l'heure en cours. */
+  llm: {
+    calls: number;
+    inputTokens: number;
+    outputTokens: number;
+    failures: number;
+    throttled: number;
+    windowStartedAt: string;
+  };
   capabilities: { push: boolean };
 }
 
@@ -96,6 +107,54 @@ export default function AdminOverviewPage() {
           hint={`${data.reviewsTotal} avis suivis au total`}
           tone={data.unansweredNegatives > 5 ? 'warning' : 'neutral'}
         />
+      </section>
+
+      {/*
+        Consommation du modèle de langage et provenance des avis.
+        Deux chiffres qu'on ne peut pas piloter sans les voir : un plafond
+        qu'on ne regarde jamais est réglé au hasard, et un parc dont on ignore
+        la part d'avis importés ne dit pas où en est l'accès aux plateformes.
+      */}
+      <section className="card">
+        <h2 style={{ fontSize: 15, marginBottom: 4 }}>Coûts et sources</h2>
+        <p className="muted" style={{ fontSize: 13, marginTop: 0 }}>
+          Appels au modèle de langage sur l’heure en cours. Le dépassement du
+          plafond ne fait échouer personne : il bascule sur le moteur
+          heuristique local.
+        </p>
+        <div className="kpi" style={{ marginTop: 12 }}>
+          <Kpi
+            label="Appels au modèle (1 h)"
+            value={String(data.llm.calls)}
+            hint={`${data.llm.inputTokens + data.llm.outputTokens} jetons`}
+          />
+          <Kpi
+            label="Appels plafonnés"
+            value={String(data.llm.throttled)}
+            hint={
+              data.llm.throttled > 0
+                ? 'emballement, ou plafond trop bas'
+                : 'aucun — cas normal'
+            }
+            tone={data.llm.throttled > 0 ? 'warning' : 'positive'}
+          />
+          <Kpi
+            label="Échecs d’appel"
+            value={String(data.llm.failures)}
+            hint="repli sur le moteur local"
+            tone={data.llm.failures > 0 ? 'warning' : 'neutral'}
+          />
+          <Kpi
+            label="Fiches Google connectées"
+            value={String(data.googleConnections)}
+            hint={`${data.establishments} établissement(s) au parc`}
+          />
+          <Kpi
+            label="Avis importés à la main"
+            value={String(data.importedReviews)}
+            hint={`sur ${data.reviewsTotal} avis suivis`}
+          />
+        </div>
       </section>
 
       <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))' }}>
