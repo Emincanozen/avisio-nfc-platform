@@ -50,6 +50,7 @@ export function createMemoryRepository(options: { seed?: boolean } = {}): Reposi
   const preferences = new Map<string, NotificationPreferences>();
   const posTickets = new Map<string, PosTicketRecord>(); // clé: estId:externalId
   const posCredentials = new Map<string, PosCredentialRecord>();
+  const rateCounters = new Map<string, { count: number; expiresAtMs: number }>();
 
   // Les identifiants générés à l'exécution doivent rester hors de portée de
   // ceux du jeu de démonstration (`inv_1`, `inv_2`…), sinon une facture créée
@@ -434,6 +435,24 @@ export function createMemoryRepository(options: { seed?: boolean } = {}): Reposi
       async touchCredential(establishmentId, at) {
         const current = posCredentials.get(establishmentId);
         if (current) posCredentials.set(establishmentId, { ...current, lastUsedAt: at });
+      },
+    },
+
+    rateLimit: {
+      async hit(key, expiresAt) {
+        // Balayage paresseux : sans lui, une instance qui tourne des semaines
+        // accumulerait une entrée par fenêtre et par IP vue. Le coût est payé
+        // par la requête qui déclenche le seuil, pas par un minuteur.
+        if (rateCounters.size > 5_000) {
+          const now = Date.now();
+          for (const [k, entry] of rateCounters) {
+            if (entry.expiresAtMs <= now) rateCounters.delete(k);
+          }
+        }
+        const current = rateCounters.get(key);
+        const count = (current?.count ?? 0) + 1;
+        rateCounters.set(key, { count, expiresAtMs: new Date(expiresAt).getTime() });
+        return count;
       },
     },
 

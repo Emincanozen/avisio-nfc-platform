@@ -409,3 +409,28 @@ model PosCredential {
 
   @@map("pos_credentials")
 }
+
+// ---------------------------------------------------------------------------
+// Limitation de debit
+// ---------------------------------------------------------------------------
+
+/**
+ * Compteur de fenetre pour la limitation de debit.
+ *
+ * En base et non en memoire : plusieurs instances d'API partagent alors le
+ * meme budget. Un compteur par processus diviserait la protection par le
+ * nombre d'instances et se remettrait a zero a chaque redeploiement, ce qui
+ * est exactement le moment ou un attaquant persistant reprend la main.
+ *
+ * La cle porte le perimetre, l'identite et le debut de fenetre : une ligne
+ * par fenetre, jamais mise a jour apres son expiration.
+ */
+model RateCounter {
+  key       String   @id
+  count     Int      @default(0)
+  expiresAt DateTime
+
+  // Le balayage des fenetres expirees se fait par cet index.
+  @@index([expiresAt])
+  @@map("rate_counters")
+}

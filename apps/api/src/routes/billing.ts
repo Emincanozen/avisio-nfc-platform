@@ -209,6 +209,17 @@ export async function registerBillingRoutes(app: FastifyInstance): Promise<void>
 
   app.post('/push/unsubscribe', protectedRoute, async (request) => {
     const body = z.object({ endpoint: z.string().url() }).parse(request.body);
+
+    // Le désabonnement était fait sur le seul point de terminaison : un gérant
+    // qui connaissait celui d'un autre pouvait éteindre ses alertes. On ne
+    // supprime donc que ce qui appartient au compte authentifié.
+    const owned = await repo.push.listByManager(request.managerId);
+    if (!owned.some((s) => s.endpoint === body.endpoint)) {
+      // Silence volontaire plutôt que 404 : répondre différemment selon
+      // l'existence du point de terminaison en ferait un oracle.
+      return { unsubscribed: true };
+    }
+
     await repo.push.unsubscribe(body.endpoint);
     return { unsubscribed: true };
   });

@@ -9,6 +9,7 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { httpError } from '../app.js';
 import { verifyPassword } from '../auth.js';
+import { consumeRate } from '../ratelimit.js';
 
 export async function registerAuthRoutes(app: FastifyInstance): Promise<void> {
   const { repo } = app.ctx;
@@ -17,6 +18,13 @@ export async function registerAuthRoutes(app: FastifyInstance): Promise<void> {
     const body = z
       .object({ email: z.string().email(), password: z.string().min(8) })
       .parse(request.body);
+
+    // Budget par compte, en plus du budget par adresse IP appliqué en amont.
+    // C'est celui-ci qui protège réellement un mot de passe : deviner exige
+    // d'insister sur le même compte, et changer d'adresse n'y change rien.
+    // Il est consommé avant la vérification, donc y compris quand le compte
+    // n'existe pas — sinon l'énumération des comptes resterait gratuite.
+    await consumeRate(app, 'login', body.email.toLowerCase());
 
     const manager = await repo.managers.findByEmail(body.email);
     // Message identique dans les deux cas : ne pas révéler l'existence du compte.

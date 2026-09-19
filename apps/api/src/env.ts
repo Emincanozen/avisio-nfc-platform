@@ -55,7 +55,33 @@ export const env = {
 
   ingestIntervalMinutes: num('INGEST_INTERVAL_MINUTES', 20),
   billingIntervalHours: num('BILLING_INTERVAL_HOURS', 6),
+
+  /**
+   * Confiance accordée à `X-Forwarded-For`.
+   *
+   * Par défaut : aucune. C'est le seul réglage sûr, parce qu'un en-tête est
+   * trivial à falsifier — et l'IP qu'il porte est précisément ce sur quoi
+   * repose la limitation de débit. Faire confiance sans proxy devant revient
+   * à laisser n'importe qui se donner une IP neuve à chaque requête et
+   * contourner tous les budgets.
+   *
+   * En production derrière un proxy, renseigner le NOMBRE de sauts de
+   * confiance (`TRUST_PROXY=1` pour un seul reverse proxy), ou la liste des
+   * adresses/CIDR de confiance. Le nombre de sauts est préférable : il ne se
+   * périme pas quand l'hébergeur change ses plages d'adresses.
+   */
+  trustProxy: parseTrustProxy(str('TRUST_PROXY')),
 } as const;
+
+function parseTrustProxy(raw: string): boolean | number | string[] {
+  if (!raw) return false;
+  const hops = Number.parseInt(raw, 10);
+  if (Number.isFinite(hops) && String(hops) === raw) return hops;
+  return raw
+    .split(',')
+    .map((part) => part.trim())
+    .filter(Boolean);
+}
 
 export const capabilities = {
   /** false => adaptateur mémoire avec jeu de démonstration. */

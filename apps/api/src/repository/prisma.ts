@@ -63,8 +63,16 @@ interface PrismaLike {
   pendingPush: Delegate;
   posTicket: Delegate;
   posCredential: Delegate;
+  rateCounter: Delegate;
   /** Réservation atomique du numéro de facture : séquence sans trou. */
   $transaction<T>(fn: (tx: PrismaLike) => Promise<T>): Promise<T>;
+  /**
+   * SQL brut, réservé à l'incrément de la limitation de débit : `upsert`
+   * ferait deux allers-retours et laisserait deux requêtes simultanées se
+   * compter une seule fois. `ON CONFLICT DO UPDATE` est atomique côté serveur.
+   */
+  $queryRawUnsafe<T>(query: string, ...values: unknown[]): Promise<T>;
+  $executeRawUnsafe(query: string, ...values: unknown[]): Promise<number>;
   $disconnect(): Promise<void>;
 }
 
@@ -664,6 +672,33 @@ export async function createPrismaRepository(): Promise<Repository> {
           where: { establishmentId },
           data: { lastUsedAt: new Date(at) },
         });
+      },
+    },
+
+    rateLimit: {
+      async hit(key, expiresAt) {
+        // Un `upsert` Prisma ferait un SELECT puis un INSERT/UPDATE : deux
+        // requêtes concurrentes liraient le même compteur et n'en
+        // enregistreraient qu'une. `ON CONFLICT DO UPDATE` règle l'incrément
+        // dans le moteur, en une seule instruction atomique.
+        const rows = await db.$queryRawUnsafe<Array<{ count: number }>>(
+          `INSERT INTO rate_counters (key, count, "expiresAt")
+           VALUES ($1, 1, $2)
+           ON CONFLICT (key) DO UPDATE SET count = rate_counters.count + 1
+           RETURNING count`,
+          key,
+          new Date(expiresAt),
+        );
+        const count = Number(rows[0]?.count ?? 1);
+
+        // Balayage opportuniste des fenêtres périmées : une fois sur deux
+        // cents, ce qui suffit à borner la table sans tâche planifiée.
+        if (Math.random() < 0.005) {
+          await db
+            .$executeRawUnsafe(`DELETE FROM rate_counters WHERE "expiresAt" < NOW()`)
+            .catch(() => 0);
+        }
+        return count;
       },
     },
 

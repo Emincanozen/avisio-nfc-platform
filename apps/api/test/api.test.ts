@@ -601,6 +601,39 @@ describe('cloisonnement entre établissements', () => {
     expect(res.statusCode).toBe(403);
   });
 
+  it("refuse d'éteindre les notifications push d'un autre compte", async () => {
+    // Le désabonnement se faisait sur le seul point de terminaison : qui
+    // connaissait celui d'un autre gérant pouvait couper ses alertes — donc
+    // l'aveugler sur ses avis négatifs, ce que le produit vend précisément.
+    const endpoint = 'https://push.example.com/abonnement-de-la-victime';
+    await app.inject({
+      method: 'POST',
+      url: '/push/subscribe',
+      headers: auth(),
+      payload: { endpoint, keys: { p256dh: 'cle-publique-de-test', auth: 'secret-auth' } },
+    });
+
+    const session = await app.inject({
+      method: 'POST',
+      url: '/auth/login',
+      payload: { email: 'intrus@test.fr', password: 'intrus12345' },
+    });
+    await app.inject({
+      method: 'POST',
+      url: '/push/unsubscribe',
+      headers: { authorization: `Bearer ${session.json().token}` },
+      payload: { endpoint },
+    });
+
+    // La réponse est volontairement indistinguable d'un succès — ne pas faire
+    // de la route un oracle d'existence — donc c'est l'état réel qu'on vérifie.
+    const managerId = (await app.inject({ method: 'GET', url: '/auth/me', headers: auth() }))
+      .json()
+      .manager.id as string;
+    const remaining = await app.ctx.repo.push.listByManager(managerId);
+    expect(remaining.map((s) => s.endpoint)).toContain(endpoint);
+  });
+
   it('laisse le gérant légitime marquer son alerte', async () => {
     const alerts = await app.inject({
       method: 'GET',

@@ -212,5 +212,27 @@ export interface Repository {
     touchCredential(establishmentId: string, at: string): Promise<void>;
   };
 
+  // -------------------------------------------------------------------------
+  // Limitation de débit
+  // -------------------------------------------------------------------------
+
+  /**
+   * Compteurs de la limitation de débit.
+   *
+   * Derrière le port, et non dans une variable de module, pour une raison
+   * précise : sur plusieurs instances d'API, un compteur en mémoire divise le
+   * budget réel par le nombre d'instances et se réinitialise à chaque
+   * redéploiement. L'adaptateur PostgreSQL rend le compteur commun aux
+   * instances et lui donne une durée de vie indépendante des processus.
+   */
+  rateLimit: {
+    /**
+     * Incrémente le compteur de `key` et renvoie son rang dans la fenêtre :
+     * la première requête vaut 1. `expiresAt` borne la vie de la ligne, une
+     * fenêtre écoulée n'ayant plus aucune valeur.
+     */
+    hit(key: string, expiresAt: string): Promise<number>;
+  };
+
   close(): Promise<void>;
 }

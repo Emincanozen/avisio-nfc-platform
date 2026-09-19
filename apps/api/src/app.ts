@@ -8,7 +8,12 @@
 
 import cors from '@fastify/cors';
 import jwt from '@fastify/jwt';
-import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from 'fastify';
+import Fastify, {
+  type FastifyInstance,
+  type FastifyReply,
+  type FastifyRequest,
+  type FastifyServerOptions,
+} from 'fastify';
 import { ZodError } from 'zod';
 import type { ManagerRole, PlatformId } from '@avisio/core';
 import { env } from './env.js';
@@ -33,6 +38,7 @@ import { registerCatalogRoutes } from './routes/catalog.js';
 import { registerIntegrationRoutes } from './routes/integrations.js';
 import { registerManagerRoutes } from './routes/manager.js';
 import { registerPublicRoutes } from './routes/public.js';
+import { registerRateLimit } from './ratelimit.js';
 
 export interface AppDeps {
   repo: Repository;
@@ -73,17 +79,45 @@ declare module 'fastify' {
 }
 
 export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
-  const app = Fastify({
+  // Options typées explicitement : `trustProxy` est une union
+  // (booléen / nombre de sauts / liste d'adresses), et la laisser inférer
+  // ferait basculer Fastify sur sa surcharge HTTP/2.
+  // Voir `env.trustProxy` : par défaut on ne croit pas X-Forwarded-For. C'est
+  // l'IP qui sert de clé à la limitation de débit — la croire sur parole
+  // reviendrait à offrir une identité neuve à chaque requête.
+  //
+  // Un nombre de sauts se traduit en prédicat : Fastify ne prend pas la forme
+  // numérique dans ses types, alors que c'est la configuration la plus sûre
+  // derrière un proxy (elle ne se périme pas quand l'hébergeur change ses
+  // plages d'adresses).
+  const hops = env.trustProxy;
+  const trustProxy: FastifyServerOptions['trustProxy'] =
+    typeof hops === 'number' ? (_address: string, hop: number) => hop < hops : hops;
+
+  const options: FastifyServerOptions = {
     logger: env.nodeEnv === 'test' ? false : { level: 'info', transport: undefined },
-    // Les landing pages NFC sont servies derrière un proxy : on fait confiance
-    // à X-Forwarded-* pour l'IP et le protocole.
-    trustProxy: true,
-  });
+    trustProxy,
+  };
+  const app = Fastify(options);
 
   const logger = {
     info: (msg: string) => app.log.info(msg),
     warn: (msg: string) => app.log.warn(msg),
   };
+
+  /**
+   * Origines autorisées à appeler l'espace gérant et le back-office.
+   *
+   * `PUBLIC_WEB_URL` en production ; localhost s'y ajoute hors production pour
+   * que `npm run dev` fonctionne sans configuration.
+   */
+  const allowedOrigins = new Set<string>([env.webUrl]);
+  if (env.nodeEnv !== 'production') {
+    for (const port of [3000, 3001]) {
+      allowedOrigins.add(`http://localhost:${port}`);
+      allowedOrigins.add(`http://127.0.0.1:${port}`);
+    }
+  }
 
   const llm = deps.llm ?? createLlmService(logger);
   const push = deps.push ?? createPushSender(deps.repo, logger);
@@ -130,10 +164,29 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
   app.decorate('ctx', ctx);
 
   await app.register(cors, {
-    // Le widget avis est embarqué sur les sites des clients : lecture ouverte,
-    // écriture réservée aux origines connues.
-    origin: true,
-    credentials: true,
+    /**
+     * Le widget d'avis est fait pour être embarqué sur le site de n'importe
+     * quel client : son origine ne peut pas être connue à l'avance, donc la
+     * lecture publique reste ouverte.
+     *
+     * Tout le reste est réservé à l'interface Avisio. `credentials` est à
+     * `false` : la session est un jeton porté par un en-tête, jamais un
+     * cookie — rien n'a besoin d'être renvoyé par le navigateur, et l'activer
+     * en même temps qu'une origine reflétée serait une faute.
+     */
+    origin: (origin, callback) => {
+      if (!origin) return callback(null, true); // appel serveur à serveur
+      callback(null, allowedOrigins.has(origin) ? origin : false);
+    },
+    credentials: false,
+  });
+
+  // Les routes publiques restent lisibles depuis n'importe quelle origine :
+  // c'est le propre d'un widget embarquable et d'une landing scannée.
+  app.addHook('onSend', async (request, reply) => {
+    if (request.raw.url?.startsWith('/public/') || request.raw.url === '/health') {
+      void reply.header('access-control-allow-origin', '*');
+    }
   });
 
   await app.register(jwt, {
@@ -217,6 +270,12 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
       error: status >= 500 ? 'Erreur interne.' : (err.message ?? 'Requête invalide.'),
     });
   });
+
+  // Le limiteur s'enregistre avant les routes : le crochet global `onRequest`
+  // s'exécute ainsi avant les gardes d'authentification de chaque route, et un
+  // déluge de tentatives de connexion est refusé avant d'atteindre le calcul
+  // de condensat du mot de passe, qui est volontairement lent.
+  registerRateLimit(app);
 
   await registerPublicRoutes(app);
   await registerAuthRoutes(app);
