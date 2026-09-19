@@ -1,0 +1,129 @@
+# Intégration continue.
+#
+# Trois vérifications, dans l'ordre du moins cher au plus cher, et une
+# quatrième qui exerce ce que les autres ne touchent pas.
+#
+# Le job `postgres` existe parce que la suite de tests tourne sur l'adaptateur
+# mémoire : sans lui, tout l'adaptateur Prisma peut compiler, passer le
+# typecheck, et s'écrouler à la première requête réelle. C'est arrivé.
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# Une nouvelle poussée annule la vérification en cours sur la même branche :
+# inutile de payer deux fois pour un état dépassé.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verification:
+    name: Typecheck, tests, build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - run: npm ci
+
+      # Couvre `src`, `test` ET `scripts`. Les tsconfig de build n'incluent que
+      # `src` : sans cette passe, une doublure de service incomplète compile et
+      # n'échoue qu'à l'exécution.
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Tests
+        run: npm test
+
+      - name: Build de production
+        run: npm run build
+
+  postgres:
+    name: Adaptateur PostgreSQL
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: avisio
+          POSTGRES_PASSWORD: avisio
+          POSTGRES_DB: avisio
+        ports:
+          - 5433:5432
+        options: >-
+          --health-cmd "pg_isready -U avisio -d avisio"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+
+    env:
+      DATABASE_URL: postgresql://avisio:avisio@localhost:5433/avisio
+      # Base jetable, créée et détruite avec le job : aucune donnée réelle.
+      NODE_ENV: test
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - run: npm ci
+
+      - name: Schéma
+        run: npx prisma db push --schema apps/api/prisma/schema.prisma
+
+      - name: Client Prisma
+        run: npx prisma generate --schema apps/api/prisma/schema.prisma
+
+      - name: Jeu de démonstration
+        run: npm run seed
+
+      # Exerce le SQL brut de la limitation de débit — y compris sous
+      # concurrence — les connexions Google et la colonne de provenance.
+      - name: Vérification de l'adaptateur
+        run: npx tsx scripts/pg-verify.mts
+
+      - name: Démarrage de l'API
+        run: |
+          npm run build -w @avisio/core
+          npm run build -w @avisio/api
+          node apps/api/dist/server.js &
+          for i in $(seq 1 30); do
+            if curl -sf http://localhost:4000/health > /dev/null; then break; fi
+            sleep 1
+          done
+          curl -sf http://localhost:4000/health
+
+      # 54 contrôles par le réseau, contre un serveur réel sur PostgreSQL.
+      - name: Test de bout en bout
+        run: node scripts/smoke-test.mjs
+
+  secrets:
+    name: Aucun secret dans le dépôt
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Tout l'historique : un secret retiré d'un fichier reste dans les
+          # commits précédents, et c'est là qu'on le trouve.
+          fetch-depth: 0
+
+      - name: Recherche de secrets committés
+        run: bash scripts/check-secrets.sh

@@ -1,6 +1,6 @@
 # État des lieux — ce qui marche, ce qui ne marche pas
 
-Document de vérité sur l'état réel du logiciel au 18 septembre 2026.
+Document de vérité sur l'état réel du logiciel au 19 septembre 2026.
 Chaque ligne est **vérifiée**, pas déclarée : la méthode de vérification est
 indiquée, et les commandes sont reproductibles.
 
@@ -21,15 +21,25 @@ autorisation de Google qui n'a pas encore été demandée.
 ```
 1. Le client scanne et tape                    ✅ fonctionne
 2. Il dépose son avis sur Google               ✅ fonctionne (c'est Google)
-3. Avisio lit cet avis                         ❌ ACCÈS GOOGLE MANQUANT
+3. Avisio lit cet avis                         ⚠️  import manuel OUI · Google NON
 4. Avisio l'analyse et crée une alerte         ✅ vérifié
 5. Avisio pousse la notification               ✅ vérifié
 6. Le gérant la reçoit sur son téléphone       ⚠️  vérifié en local, pas sur un vrai appareil
 ```
 
-**Conclusion honnête : en l'état, un vrai avis Google ne déclenche pas de
-notification, parce que le produit ne peut pas encore lire les avis Google.**
-Tout le reste derrière est prêt et testé.
+**Conclusion honnête, mise à jour le 19 septembre 2026 :**
+
+- Un avis **importé** déclenche bien une alerte et une notification. C'est
+  vérifié de bout en bout, sans simulation, contre PostgreSQL
+  (`node scripts/push-selftest.mjs`). L'import est un chemin de production,
+  pas un pis-aller de démonstration.
+- Un avis déposé sur Google **n'entre toujours pas tout seul**. Le
+  consentement par établissement est implémenté ; l'accès à l'API Google
+  n'est pas accordé, et un projet non approuvé a un quota de 0 requête par
+  minute. Voir `docs/google.md`.
+
+Autrement dit : la machine fonctionne et on peut l'alimenter dès aujourd'hui,
+mais la synchronisation automatique avec Google attend Google.
 
 ---
 
@@ -238,19 +248,21 @@ manifestait par une erreur d'authentification trompeuse. Il écoute désormais s
 - Que les notifications arrivent sur un vrai téléphone : il y faut un domaine
   HTTPS et un appareil réel (§3).
 - Que les vrais avis Google entrent : l'accès API reste à obtenir (§2).
-- Il n'y a **aucune limitation de débit** sur les routes publiques (scan,
-  fidélité, widget). Un script pourrait gonfler les compteurs de scans d'un
-  établissement. À traiter avant l'ouverture au public.
+- ~~Il n'y a aucune limitation de débit sur les routes publiques.~~
+  **Corrigé le 19 septembre 2026** (commit `7a68f2b`) : limitation sur toute
+  l'API, comptage partagé en base, 18 tests. Voir `docs/securite.md` §4.
 
 ---
 
 ## 8. Reproduire les vérifications
 
 ```bash
-npm test                                 # 236 tests, sans base ni réseau
+npm test                                 # 306 tests, sans base ni réseau
 npm run typecheck                        # TypeScript strict, tests et scripts compris
 node scripts/smoke-test.mjs              # 54 contrôles de bout en bout, par le réseau
 node scripts/push-selftest.mjs           # chaîne de notification, 2 phases
+npx tsx scripts/pg-verify.mts            # adaptateur Prisma (DATABASE_URL requis)
+bash scripts/check-secrets.sh            # secrets : fichiers suivis ET historique
 node scripts/pos-webhook-demo.mjs <clé>  # webhook caisse signé
 npx tsx scripts/financial-model.ts       # régénère le modèle financier
 ```
@@ -268,3 +280,53 @@ node scripts/smoke-test.mjs              # doit annoncer « PostgreSQL (Prisma) 
 Pour `push-selftest.mjs`, l'API doit tourner avec
 `NODE_TLS_REJECT_UNAUTHORIZED=0` (certificat de test auto-signé) et `openssl`
 doit être disponible — il est livré avec Git sous Windows.
+
+---
+
+## 9. Audit du 19 septembre 2026 — finalisation
+
+Quatre lots de travail, tous committés et vérifiés.
+
+### Ce qui a été trouvé et corrigé
+
+| Défaut | Gravité | Correctif |
+|---|---|---|
+| Aucune limitation de débit sur l'API | **haute** | Limitation complète, comptage partagé en base (`7a68f2b`) |
+| `/push/unsubscribe` sans contrôle de propriété | **haute** | Un gérant pouvait couper les notifications d'un autre, donc l'aveugler sur ses avis négatifs. Restreint au compte authentifié |
+| `trustProxy: true` sans proxy | **haute** | L'IP étant la clé de toute la limitation, la croire sur parole l'annulait. Désactivé par défaut, réglable par `TRUST_PROXY` |
+| Connecteur Google mono-locataire | **haute** | Un jeton global ne peut pas exister : personne ne consent pour autrui. Consentement par établissement (`6d24386`) |
+| Jetons OAuth prévus en clair | **haute** | Scellement AES-256-GCM |
+| Prompts ouverts à l'injection | moyenne | Clôture neutralisée, texte borné, consigne rappelée après la donnée (`c22b4b4`) |
+| Aucun plafond de dépense modèle | moyenne | Plafond horaire, délai de garde, repli heuristique |
+| `/health` superficielle | moyenne | Interroge la base, répond 503 sinon |
+| CORS reflétant toute origine | moyenne | Restreint hors routes publiques |
+| Plaquette non configurée → 409 au client | moyenne | Page calme en six langues (`c22b4b4`) |
+| Quota d'API tierce gaspillé | faible | `lastReviewDate` filtré par plateforme en base |
+| 429 par compte sans `retry-after` | faible | Aligné sur celui du crochet global |
+| Autotest annonçant une panne inexistante | faible | Rendu déterministe (`939888a`) |
+
+### Ce qui a été vérifié contre une vraie base
+
+PostgreSQL 16, conteneur jetable sur le port 5433 :
+
+- 54 / 54 contrôles de bout en bout par le réseau.
+- 18 / 18 sur l'adaptateur Prisma, dont le SQL brut de la limitation de débit
+  sous **60 requêtes simultanées** : aucun incrément perdu.
+- Chaîne de notification complète : 240 octets chiffrés livrés, alerte créée,
+  notification poussée.
+- Parcours d'import mené dans l'interface : prévisualisation nommant chaque
+  ligne refusée, écriture, alerte sur l'avis 1★, provenance `import` en base.
+- Plaquette sans plateforme active : page en français, sans erreur technique.
+
+### Ce qui reste invérifié, et pourquoi
+
+| Point | Raison |
+|---|---|
+| Lecture d'avis Google réels | Accès API non accordé. Aucune doublure ne peut en tenir lieu |
+| Envoi d'e-mails réels | Pas de clé Resend ; le repli console est ce qui a été exercé |
+| Réception d'un push sur un vrai téléphone | Demande un domaine en HTTPS |
+| Déploiement, sauvegarde, restauration | Rien n'est déployé à ce jour |
+| Montée en charge | Aucune mesure |
+
+**Un audit trouve des défauts, il ne prouve pas leur absence.** Ce tableau
+dit ce qui a été cherché et trouvé, pas que le reste est sain.

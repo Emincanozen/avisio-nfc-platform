@@ -59,6 +59,7 @@ curl -H 'accept-language: it-IT,it;q=0.9' http://localhost:4000/public/tag/k7m2p
 | **Fidélité** | Points accordés pour le dépôt d'un avis, jamais pour sa note. Contacts stockés en condensat. |
 | **Notifications** | E-mail et push web (PWA installable), préférences par événement, heures calmes qui diffèrent le push sans retenir l'e-mail. |
 | **Rapport mensuel** | Envoyé le 1er du mois aux offres éligibles, en HTML et en PDF. |
+| **Sources d’avis** | Consentement Google par établissement (OAuth, jeton scellé, diagnostic étape par étape) et import manuel d’un export de plateforme, avec prévisualisation avant écriture. |
 | **Intégration caisse** | Webhook signé HMAC, invitation différée de 2 h, carence de 30 jours par client, URL à imprimer sur le ticket. |
 | **Facturation** | Abonnements, numérotation légale continue, PDF avec mentions obligatoires, prorata au changement d'offre, relances et suspension. |
 | **Back-office** | MRR/ARR, attrition mesurée, impayés, onboarding complet en un écran, gestion des comptes, déclenchement des traitements. |
@@ -69,10 +70,11 @@ curl -H 'accept-language: it-IT,it;q=0.9' http://localhost:4000/public/tag/k7m2p
 npm test
 ```
 
-236 tests : 150 sur le domaine métier (tarification, facturation, routage,
-conformité, NLP, tendances, benchmark, fidélité, notifications, rapport, caisse)
-et 86 tests d’intégration de l’API. Ils tournent sans base de données, sans
-Docker et sans réseau.
+306 tests : 174 sur le domaine métier (tarification, facturation, routage,
+conformité, NLP, tendances, benchmark, fidélité, notifications, rapport,
+caisse, import) et 132 tests d’intégration de l’API — dont la limitation de
+débit et le cloisonnement entre établissements. Ils tournent sans base de
+données, sans Docker et sans réseau.
 
 ```bash
 npm run typecheck   # TypeScript strict, fichiers de test et scripts compris
@@ -84,10 +86,14 @@ Deux vérifications supplémentaires, contre un serveur en fonctionnement :
 ```bash
 node scripts/smoke-test.mjs     # 54 contrôles de bout en bout, par le réseau
 node scripts/push-selftest.mjs  # chaîne de notification, signature et chiffrement
+npx tsx scripts/pg-verify.mts   # adaptateur Prisma (DATABASE_URL requis)
+bash scripts/check-secrets.sh   # secrets : fichiers suivis ET historique Git
 ```
 
-`smoke-test.mjs` est le seul à exercer l'adaptateur PostgreSQL : la suite de
-tests, elle, tourne sur l'adaptateur mémoire.
+La suite de tests tourne sur l'adaptateur mémoire ; `smoke-test.mjs` et
+`pg-verify.mts` sont les seuls à exercer PostgreSQL. Le second couvre ce que
+le premier ne touche pas : le SQL brut de la limitation de débit sous
+concurrence, les connexions Google et la provenance des avis.
 
 ## Traitements de fond
 
@@ -169,6 +175,10 @@ infra/             PostgreSQL de développement
 | [`docs/architecture.md`](docs/architecture.md) | Architecture, modèle de données, moteur de routage, exploitation, passage à l'échelle |
 | [`docs/conformite.md`](docs/conformite.md) | Cadre réglementaire, RGPD, mise en œuvre exécutable des règles |
 | [`docs/go-to-market.md`](docs/go-to-market.md) | Cible, argumentaire, objections, processus de vente, rétention |
+| [`docs/google.md`](docs/google.md) | Intégration Google : ce qui bloque, la procédure exacte, l’import manuel |
+| [`docs/deploiement.md`](docs/deploiement.md) | Installation, mise à jour, sauvegarde, restauration, incidents |
+| [`docs/securite.md`](docs/securite.md) | Modèle de menace, protections, failles trouvées et corrigées |
+| [`memory.md`](memory.md) · [`cloud.md`](cloud.md) · [`CLAUDE.md`](CLAUDE.md) | Reprise du projet par un autre développeur ou assistant |
 
 Le modèle financier se régénère :
 
@@ -179,17 +189,21 @@ npx tsx scripts/financial-model.ts
 ## Est-ce que ça marche vraiment ?
 
 Question légitime, réponse précise dans [`docs/etat-des-lieux.md`](docs/etat-des-lieux.md).
-En résumé : **la chaîne de notification fonctionne et se vérifie**, mais elle
-n'est pas encore branchée sur les vrais avis Google.
 
 ```
 1. Le client scanne et tape                    ✅
 2. Il dépose son avis sur Google               ✅
-3. Avisio lit cet avis                         ❌ accès API Google à demander
+3. Avisio lit cet avis                         ⚠️ import manuel OUI · Google NON
 4. Avisio l'analyse et crée une alerte         ✅ vérifié
 5. Avisio pousse la notification               ✅ vérifié
 6. Le gérant la reçoit sur son téléphone       ⚠️ vérifié en local
 ```
+
+En résumé : **un avis importé déclenche réellement une alerte et une
+notification**, vérifié de bout en bout contre PostgreSQL. Un avis déposé sur
+Google n’entre pas encore tout seul — l’accès à l’API est à demander, et un
+projet non approuvé a un quota de zéro requête par minute
+([`docs/google.md`](docs/google.md)).
 
 Pour le vérifier vous-même :
 
@@ -212,9 +226,12 @@ Par honnêteté, et par ordre de priorité :
    constaté à la main depuis le back-office. Brancher un prestataire (mandat
    SEPA via GoCardless, ou Stripe Billing) revient à écrire un second adaptateur
    `PaymentProvider` ; rien d'autre ne change.
-2. **Accès API Google Business Profile.** Le connecteur est écrit et testé,
-   l'accès partenaire est à demander (4 à 8 semaines de délai). D'ici là, le
-   connecteur simulé produit des avis à la cadence réelle.
+2. **Accès API Google Business Profile.** Le parcours de consentement par
+   établissement est écrit ; l'accès reste à demander. Un projet non approuvé
+   a un quota de **0 requête par minute** : tous les appels échouent, ce n'est
+   pas un défaut d'implémentation. D'ici là, l'import manuel alimente le
+   produit avec de vrais avis, et le connecteur simulé sert la démonstration.
+   Procédure : [`docs/google.md`](docs/google.md).
 3. **Accès partenaires TripAdvisor / Facebook / Yelp.** Même situation.
 4. **Envoi de SMS.** Les invitations de caisse par SMS sont journalisées : il
    manque un opérateur (Brevo, OVH SMS). Le canal e-mail, lui, fonctionne.
