@@ -368,6 +368,10 @@ export async function createPrismaRepository(): Promise<Repository> {
         });
         return toAlert(row);
       },
+      async findById(id) {
+        const row = await db.alert.findUnique({ where: { id } });
+        return row ? toAlert(row) : null;
+      },
       async listByEstablishment(establishmentId, limit = 50) {
         const rows = await db.alert.findMany({
           where: { establishmentId },

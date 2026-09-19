@@ -142,7 +142,11 @@ export function buildDemoDataset(now = new Date()): DemoDataset {
     link('est_atelier', 'google', 'https://g.page/r/atelier-sezanne/review', 96, 4.7),
     link('est_atelier', 'facebook', 'https://facebook.com/ateliersezanne/reviews', 21, 4.6),
     link('est_hotel', 'google', 'https://g.page/r/hotel-garonne/review', 233, 3.9),
-    link('est_hotel', 'tripadvisor', 'https://www.tripadvisor.fr/UserReview-garonne', 14, 3.7),
+    // Désactivée : l'Hôtel Garonne est en offre Essentiel, qui n'autorise que
+    // Google. Le lien reste en base — ses 14 avis nourrissent la répartition
+    // affichée au gérant — mais il n'entre pas dans le routage. Laisser deux
+    // plateformes actives contredirait le quota de son offre.
+    link('est_hotel', 'tripadvisor', 'https://www.tripadvisor.fr/UserReview-garonne', 14, 3.7, false),
   ];
 
   const tags: NfcTag[] = [
@@ -441,12 +445,13 @@ export function buildDemoDataset(now = new Date()): DemoDataset {
     reviewUrl: string,
     reviewCount: number,
     averageRating?: number,
+    enabled = true,
   ): PlatformLink {
     return {
       establishmentId,
       platform,
       reviewUrl,
-      enabled: true,
+      enabled,
       reviewCount,
       routedScans: 0,
       ...(averageRating == null ? {} : { averageRating }),

@@ -131,6 +131,7 @@ export interface Repository {
 
   alerts: {
     create(alert: Alert): Promise<Alert>;
+    findById(id: string): Promise<Alert | null>;
     listByEstablishment(establishmentId: string, limit?: number): Promise<Alert[]>;
     markRead(id: string, at: string): Promise<void>;
     /** Évite de réémettre la même alerte de tendance plusieurs jours de suite. */

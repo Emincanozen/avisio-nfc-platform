@@ -15,7 +15,7 @@
     "build": "npm run build -w @avisio/core && npm run build -w @avisio/api && npm run build -w @avisio/web",
     "test": "vitest run",
     "test:watch": "vitest",
-    "typecheck": "tsc -b packages/core apps/api --pretty false && npm run typecheck -w @avisio/web",
+    "typecheck": "tsc -b packages/core apps/api --pretty false && tsc -p tsconfig.typecheck.json --pretty false && npm run typecheck -w @avisio/web",
     "lint": "npm run typecheck",
     "db:up": "docker compose -f infra/docker-compose.yml up -d",
     "db:down": "docker compose -f infra/docker-compose.yml down",

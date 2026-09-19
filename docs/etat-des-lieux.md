@@ -175,14 +175,94 @@ viennent de la vraie fiche Google du client. Ils n'en viennent pas encore.
 
 ---
 
-## 7. Reproduire les vérifications
+## 7. Audit du 19 septembre 2026
+
+Passe de vérification systématique : audit des contrôles d'accès route par
+route, exécution de l'adaptateur PostgreSQL contre une vraie base, sondage des
+cas limites. **Sept défauts trouvés, tous corrigés et couverts par un test.**
+
+### Sécurité — deux failles de cloisonnement
+
+| Défaut | Portée | Correctif |
+|---|---|---|
+| `POST /ops/ingest` et `/ops/trends` ouverts à tout gérant | Un client pouvait déclencher l'ingestion de **tout le parc** : appels aux API des plateformes et dépenses de modèle de langage de tous les autres établissements | Routes supprimées ; seules les versions `/admin/ops/*` subsistent, derrière `requireAdmin` |
+| `POST /alerts/:id/read` sans contrôle d'appartenance | L'identifiant d'une alerte suffisait à la marquer lue chez un autre établissement | Lecture préalable de l'alerte puis `assertAccess` |
+
+### Exploitabilité — trois défauts
+
+| Défaut | Conséquence | Correctif |
+|---|---|---|
+| Toute saisie invalide renvoyait **500 « Erreur interne »** | Les alertes d'exploitation se déclenchaient sur de la simple mauvaise saisie ; un intégrateur caisse réessayait une requête qui ne passerait jamais | 400 avec le nom du champ fautif et `code: "validation"` |
+| Plaquette sans plateforme active : **500** | Une configuration incomplète ressemblait à une panne, sur la page vue par le client | 409 avec `code: "not_configured"` et le motif |
+| Refus de conformité en **500** | Idem : une règle métier appliquée passait pour un bug | 422, requête bien formée mais refusée |
+
+### Données — deux incohérences
+
+| Défaut | Conséquence | Correctif |
+|---|---|---|
+| Le script d'amorçage ignorait abonnements, factures, préférences et tickets | Sur PostgreSQL, le back-office affichait **0 € de MRR** et aucune facture | Amorçage complété ; les factures repassent par le compteur légal |
+| L'Hôtel Garonne (offre Essentiel, quota 1 plateforme) avait **deux** plateformes actives | Le jeu de démonstration contredisait sa propre règle de quota ; réactiver Google était ensuite refusé | TripAdvisor désactivée, ses avis restent affichés dans la répartition |
+
+### Outillage
+
+Les fichiers de test n'étaient **pas typecheckés** : les `tsconfig` de build
+n'incluent que `src`. Une doublure de service à laquelle il manquait une méthode
+passait la compilation et n'échouait qu'à l'exécution, avec une erreur sans
+rapport apparent. `tsconfig.typecheck.json` couvre désormais `src`, `test` et
+`scripts` — il a immédiatement trouvé ce cas et quatre erreurs de typage
+latentes dans le modèle financier.
+
+Formatage : le tableau de bord affichait « 3.89 » à l'anglaise alors que les PDF
+étaient en français. Uniformisé en « 3,89 ».
+
+### Ce qui a été vérifié contre une vraie base PostgreSQL
+
+L'adaptateur Prisma n'avait jamais été exécuté — la suite de tests tourne sur
+l'adaptateur mémoire. Il l'est maintenant :
+
+- schéma appliqué (16 tables), jeu de démonstration chargé ;
+- **54 contrôles de bout en bout** passés par le réseau (`scripts/smoke-test.mjs`) ;
+- **12 onboardings simultanés** : 24 factures, aucun doublon, aucun trou dans la
+  numérotation légale. Le compteur transactionnel tient sous concurrence ;
+- interface web vérifiée sur cette base : back-office, tableau de bord, factures.
+
+Un conflit de port a été corrigé au passage : le conteneur écoutait sur 5432,
+déjà pris par un PostgreSQL local sur beaucoup de postes. La collision se
+manifestait par une erreur d'authentification trompeuse. Il écoute désormais sur
+**5433**.
+
+### Ce que cet audit ne prouve pas
+
+- Qu'il n'y a plus aucun bug. Un audit trouve des défauts, il n'en démontre pas
+  l'absence.
+- Que les notifications arrivent sur un vrai téléphone : il y faut un domaine
+  HTTPS et un appareil réel (§3).
+- Que les vrais avis Google entrent : l'accès API reste à obtenir (§2).
+- Il n'y a **aucune limitation de débit** sur les routes publiques (scan,
+  fidélité, widget). Un script pourrait gonfler les compteurs de scans d'un
+  établissement. À traiter avant l'ouverture au public.
+
+---
+
+## 8. Reproduire les vérifications
 
 ```bash
-npm test                              # 230 tests, sans base ni réseau
-npm run typecheck                     # TypeScript strict
-node scripts/push-selftest.mjs        # chaîne de notification, 2 phases
+npm test                                 # 236 tests, sans base ni réseau
+npm run typecheck                        # TypeScript strict, tests et scripts compris
+node scripts/smoke-test.mjs              # 54 contrôles de bout en bout, par le réseau
+node scripts/push-selftest.mjs           # chaîne de notification, 2 phases
 node scripts/pos-webhook-demo.mjs <clé>  # webhook caisse signé
-npx tsx scripts/financial-model.ts    # régénère le modèle financier
+npx tsx scripts/financial-model.ts       # régénère le modèle financier
+```
+
+Pour exercer l'adaptateur PostgreSQL plutôt que la mémoire :
+
+```bash
+npm run db:up                            # conteneur sur le port 5433
+export DATABASE_URL=postgresql://avisio:avisio@localhost:5433/avisio
+npm run db:push && npm run seed
+npx tsx apps/api/src/server.ts &
+node scripts/smoke-test.mjs              # doit annoncer « PostgreSQL (Prisma) »
 ```
 
 Pour `push-selftest.mjs`, l'API doit tourner avec

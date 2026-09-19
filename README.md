@@ -69,15 +69,25 @@ curl -H 'accept-language: it-IT,it;q=0.9' http://localhost:4000/public/tag/k7m2p
 npm test
 ```
 
-230 tests : 150 sur le domaine métier (tarification, facturation, routage,
+236 tests : 150 sur le domaine métier (tarification, facturation, routage,
 conformité, NLP, tendances, benchmark, fidélité, notifications, rapport, caisse)
-et 80 tests d'intégration de l'API. Ils tournent sans base de données, sans
+et 86 tests d’intégration de l’API. Ils tournent sans base de données, sans
 Docker et sans réseau.
 
 ```bash
-npm run typecheck   # TypeScript strict sur les trois paquets
+npm run typecheck   # TypeScript strict, fichiers de test et scripts compris
 npm run build       # build de production
 ```
+
+Deux vérifications supplémentaires, contre un serveur en fonctionnement :
+
+```bash
+node scripts/smoke-test.mjs     # 54 contrôles de bout en bout, par le réseau
+node scripts/push-selftest.mjs  # chaîne de notification, signature et chiffrement
+```
+
+`smoke-test.mjs` est le seul à exercer l'adaptateur PostgreSQL : la suite de
+tests, elle, tourne sur l'adaptateur mémoire.
 
 ## Traitements de fond
 
@@ -105,8 +115,8 @@ produire.
 ## Avec une vraie base de données
 
 ```bash
-npm run db:up                                                    # PostgreSQL 16 via Docker
-echo 'DATABASE_URL=postgresql://avisio:avisio@localhost:5432/avisio' >> .env
+npm run db:up                                                    # PostgreSQL 16 via Docker, port 5433
+echo 'DATABASE_URL=postgresql://avisio:avisio@localhost:5433/avisio' >> .env
 npm run db:push                                                  # schéma
 npm run seed                                                     # jeu de démonstration
 npm run dev
@@ -142,10 +152,10 @@ npx web-push generate-vapid-keys
 
 ```
 packages/core/     Domaine métier pur, sans dépendance — 150 tests
-apps/api/          API REST Fastify + Prisma — 80 tests d'intégration
+apps/api/          API REST Fastify + Prisma — 86 tests d'intégration
 apps/web/          Next.js : landing NFC, espace gérant, back-office, vitrine, widget, PWA
 docs/              Business plan, modèle financier, architecture, conformité, GTM
-scripts/           Modèle financier exécutable, simulateur de caisse
+scripts/           Modèle financier, tests de bout en bout, simulateur de caisse
 infra/             PostgreSQL de développement
 ```
 

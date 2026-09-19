@@ -9,7 +9,7 @@
 
 import { notFound } from 'next/navigation';
 import { serverApi } from '@/lib/api';
-import { Stars, formatDate } from '@/components/ui';
+import { Stars, formatDate, num } from '@/components/ui';
 
 interface WidgetPayload {
   establishment: { id: string; name: string };
@@ -40,7 +40,7 @@ export default async function WidgetPage({ params }: { params: Promise<{ id: str
           <div className="row" style={{ gap: 8, marginTop: 2 }}>
             {data.averageRating != null && <Stars rating={data.averageRating} />}
             <span className="muted" style={{ fontSize: 13.5 }}>
-              {data.averageRating != null && `${data.averageRating.toFixed(1)}/5 · `}
+              {data.averageRating != null && `${num(data.averageRating, 1)}/5 · `}
               {data.totalCount} avis
             </span>
           </div>

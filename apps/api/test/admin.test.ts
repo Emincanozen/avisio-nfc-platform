@@ -251,7 +251,8 @@ describe('onboarding', () => {
         manager: { ...payload.manager, email: 'autre@davinci.test' },
       },
     });
-    expect(res.statusCode).toBe(500);
+    expect(res.statusCode).toBe(400);
+    expect(res.json().error).toContain('Code postal');
   });
 });
 

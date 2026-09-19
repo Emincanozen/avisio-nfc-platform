@@ -10,7 +10,7 @@
  * par le jeu de démonstration.
  */
 
-import { buildDemoDataset, DEMO_CREDENTIALS } from '../demo-data.js';
+import { buildDemoDataset, DEMO_ADMIN_CREDENTIALS, DEMO_CREDENTIALS } from '../demo-data.js';
 import { capabilities, env } from '../env.js';
 import { createRepository } from '../repository/index.js';
 
@@ -62,16 +62,48 @@ async function main(): Promise<void> {
   for (const scan of demo.scans) await repo.scans.create(scan);
   for (const alert of demo.alerts) await repo.alerts.create(alert);
   for (const member of demo.loyalty) await repo.loyalty.create(member);
+  for (const subscription of demo.subscriptions) {
+    await repo.subscriptions.create(subscription);
+  }
+  for (const preference of demo.preferences) {
+    await repo.notificationPreferences.upsert(preference);
+  }
+  for (const credential of demo.posCredentials) {
+    await repo.pos.upsertCredential(credential);
+  }
+  for (const ticket of demo.posTickets) await repo.pos.createTicket(ticket);
+
+  // Les factures portent leur numéro légal : il est attribué par le dépôt, qui
+  // incrémente le compteur de l'année. On repasse donc par `create` plutôt que
+  // de recopier les numéros du jeu de démonstration, sinon la séquence de la
+  // base et celle des factures divergeraient dès la première facturation.
+  for (const invoice of demo.invoices) {
+    const { id: _id, number: _number, ...draft } = invoice;
+    const created = await repo.invoices.create(draft, new Date(invoice.issuedAt).getUTCFullYear());
+    if (invoice.status !== 'open') {
+      await repo.invoices.update(created.id, {
+        status: invoice.status,
+        ...(invoice.paidAt ? { paidAt: invoice.paidAt } : {}),
+      });
+    } else if (invoice.remindersSent > 0) {
+      await repo.invoices.update(created.id, { remindersSent: invoice.remindersSent });
+    }
+  }
 
   console.log(
     [
       'Jeu de démonstration chargé :',
       `  ${demo.establishments.length} établissements`,
+      `  ${demo.managers.length} comptes`,
       `  ${demo.tags.length} plaquettes NFC`,
       `  ${demo.reviews.length} avis`,
       `  ${demo.scans.length} scans`,
+      `  ${demo.subscriptions.length} abonnements`,
+      `  ${demo.invoices.length} factures`,
+      `  ${demo.posTickets.length} tickets de caisse`,
       '',
-      `Connexion : ${DEMO_CREDENTIALS.email} / ${DEMO_CREDENTIALS.password}`,
+      `Gérant     : ${DEMO_CREDENTIALS.email} / ${DEMO_CREDENTIALS.password}`,
+      `Exploitant : ${DEMO_ADMIN_CREDENTIALS.email} / ${DEMO_ADMIN_CREDENTIALS.password}`,
     ].join('\n'),
   );
 

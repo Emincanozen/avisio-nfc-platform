@@ -9,6 +9,7 @@
 import cors from '@fastify/cors';
 import jwt from '@fastify/jwt';
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from 'fastify';
+import { ZodError } from 'zod';
 import type { ManagerRole, PlatformId } from '@avisio/core';
 import { env } from './env.js';
 import type { Repository } from './repository/index.js';
@@ -175,11 +176,45 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
 
   app.setErrorHandler((error: unknown, request, reply) => {
     const err = error as { statusCode?: number; message?: string; name?: string };
+
+    // Une saisie invalide est une erreur du client, pas du serveur. Renvoyée en
+    // 500, elle déclencherait les alertes d'exploitation à chaque formulaire mal
+    // rempli, et un intégrateur réessaierait une requête qui ne passera jamais.
+    if (error instanceof ZodError) {
+      const fields = error.issues.map((issue) => ({
+        champ: issue.path.join('.') || '(racine)',
+        message: issue.message,
+      }));
+      void reply.code(400).send({
+        error: `Requête invalide : ${fields.map((f) => `${f.champ} — ${f.message}`).join(' ; ')}`,
+        code: 'validation',
+        fields,
+      });
+      return;
+    }
+
+    // Refus de conformité : la requête est bien formée mais inacceptable.
+    if (err.name === 'ComplianceError') {
+      void reply.code(422).send({ error: err.message ?? 'Configuration non conforme.', code: 'compliance' });
+      return;
+    }
+
+    // Plaquette scannée sur un établissement sans plateforme active : c'est une
+    // configuration incomplète, pas une panne. En 500, la page du client
+    // devenait indistinguable d'une vraie indisponibilité, et chaque scan sur
+    // une plaquette mal réglée déclenchait les alertes d'exploitation.
+    if (err.name === 'NoRoutablePlatformError') {
+      void reply.code(409).send({
+        error: err.message ?? 'Aucune plateforme active sur cet établissement.',
+        code: 'not_configured',
+      });
+      return;
+    }
+
     const status = err.statusCode ?? 500;
     if (status >= 500) request.log.error({ err: error }, 'Erreur non gérée');
     void reply.code(status).send({
       error: status >= 500 ? 'Erreur interne.' : (err.message ?? 'Requête invalide.'),
-      ...(err.name === 'ComplianceError' ? { code: 'compliance' } : {}),
     });
   });
 

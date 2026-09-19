@@ -31,7 +31,7 @@ import { env } from '../env.js';
 const idParam = z.object({ id: z.string().min(3) });
 
 export async function registerManagerRoutes(app: FastifyInstance): Promise<void> {
-  const { repo, analytics, llm, connectors, ingest } = app.ctx;
+  const { repo, analytics, llm, connectors } = app.ctx;
   const protectedRoute = { onRequest: [app.authenticate] };
 
   // ---- Établissements ----------------------------------------------------
@@ -251,6 +251,12 @@ export async function registerManagerRoutes(app: FastifyInstance): Promise<void>
 
   app.post('/alerts/:id/read', protectedRoute, async (request) => {
     const { id } = idParam.parse(request.params);
+    // Sans cette lecture préalable, n'importe quel gérant authentifié pouvait
+    // marquer lue l'alerte d'un autre établissement : l'identifiant suffisait.
+    const alert = await repo.alerts.findById(id);
+    if (!alert) throw httpError(404, 'Alerte introuvable.');
+    assertAccess(request, alert.establishmentId);
+
     await repo.alerts.markRead(id, new Date().toISOString());
     return { ok: true };
   });
@@ -371,12 +377,9 @@ export async function registerManagerRoutes(app: FastifyInstance): Promise<void>
     };
   });
 
-  // ---- Exploitation ------------------------------------------------------
-
-  /** Déclenche un cycle d'ingestion à la demande (démo, support, rattrapage). */
-  app.post('/ops/ingest', protectedRoute, async () => ingest.runOnce());
-
-  app.post('/ops/trends', protectedRoute, async () => ({
-    alertsCreated: await ingest.runDaily(),
-  }));
+  // Le déclenchement manuel des traitements vit dans `admin.ts`, derrière
+  // `requireAdmin`. Ces traitements balaient TOUT le parc : laissés ouverts à
+  // un gérant, ils auraient permis à un client de déclencher les appels aux
+  // API des plateformes et les dépenses de modèle de langage de tous les
+  // autres établissements.
 }

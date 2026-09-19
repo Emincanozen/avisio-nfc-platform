@@ -101,6 +101,24 @@ export function percent(value: number): string {
   return `${Math.round(value * 100)} %`;
 }
 
+/**
+ * Nombre en écriture française : virgule décimale.
+ *
+ * `toFixed()` produit un point, qui détonne face aux montants en euros et aux
+ * PDF du produit, tous formatés en français.
+ */
+export function num(value: number, digits = 2): string {
+  return value.toLocaleString('fr-FR', {
+    minimumFractionDigits: digits,
+    maximumFractionDigits: digits,
+  });
+}
+
+/** Écart signé, avec le signe moins typographique. */
+export function delta(value: number, digits = 2): string {
+  return `${value > 0 ? '+' : value < 0 ? '−' : ''}${num(Math.abs(value), digits)}`;
+}
+
 export function Empty({ children }: { children: React.ReactNode }) {
   return (
     <div className="card" style={{ textAlign: 'center', color: 'var(--text-muted)' }}>

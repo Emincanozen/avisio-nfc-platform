@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { useCallback, useEffect, useState } from 'react';
 import { api } from '@/lib/api';
-import { Empty, Stars, formatDate } from '@/components/ui';
+import { Empty, Stars, formatDate, num } from '@/components/ui';
 
 interface Row {
   id: string;
@@ -97,7 +97,7 @@ export default function ParcPage() {
               <div className="row" style={{ gap: 8, marginTop: 6 }}>
                 <Stars rating={row.averageRating} />
                 <span className="muted" style={{ fontSize: 13 }}>
-                  {row.averageRating.toFixed(2)}/5 sur {row.reviews} avis
+                  {num(row.averageRating)}/5 sur {row.reviews} avis
                 </span>
               </div>
             </div>

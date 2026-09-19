@@ -116,8 +116,15 @@ const ACQUISITION_PLAN: number[] = [
 // Calculs dérivés
 // ---------------------------------------------------------------------------
 
+interface ArpuDetail {
+  subscription: number;
+  analytics: number;
+  loyalty: number;
+  extraPlatform: number;
+}
+
 /** ARPU mensuel : abonnement moyen + add-ons réellement facturables. */
-function computeArpu(): { arpu: number; detail: Record<string, number> } {
+function computeArpu(): { arpu: number; detail: ArpuDetail } {
   const mix = ASSUMPTIONS.planMix;
   const subscription =
     (mix.essentiel * PLANS.essentiel.monthlyCents +
@@ -139,7 +146,7 @@ function computeArpu(): { arpu: number; detail: Record<string, number> } {
       ADDONS.extra_platform.monthlyCents) /
     100;
 
-  const detail = { subscription, analytics, loyalty, extraPlatform };
+  const detail: ArpuDetail = { subscription, analytics, loyalty, extraPlatform };
   return { arpu: subscription + analytics + loyalty + extraPlatform, detail };
 }
 

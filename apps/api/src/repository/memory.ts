@@ -234,6 +234,9 @@ export function createMemoryRepository(options: { seed?: boolean } = {}): Reposi
         alerts.unshift(alert);
         return alert;
       },
+      async findById(id) {
+        return alerts.find((a) => a.id === id) ?? null;
+      },
       async listByEstablishment(establishmentId, limit = 50) {
         return alerts
           .filter((a) => a.establishmentId === establishmentId)

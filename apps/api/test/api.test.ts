@@ -9,7 +9,7 @@
 import type { FastifyInstance } from 'fastify';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { buildApp } from '../src/app.js';
-import { DEMO_CREDENTIALS } from '../src/demo-data.js';
+import { DEMO_ADMIN_CREDENTIALS, DEMO_CREDENTIALS } from '../src/demo-data.js';
 import { createMemoryRepository } from '../src/repository/memory.js';
 import type { LlmService } from '../src/services/anthropic.js';
 import { createSimulatedConnector } from '../src/services/google.js';
@@ -37,6 +37,9 @@ const fakeNotifier: Notifier = {
   async alert(to, establishment, alert) {
     sentEmails.push({ to, subject: `${establishment.name} — ${alert.title}` });
   },
+  async billing(to, _establishment, subject) {
+    sentEmails.push({ to, subject });
+  },
   async monthlyReport(to, establishment) {
     sentEmails.push({ to, subject: `${establishment.name} — rapport` });
   },
@@ -44,6 +47,7 @@ const fakeNotifier: Notifier = {
 
 let app: FastifyInstance;
 let token: string;
+let adminToken: string;
 
 beforeAll(async () => {
   const connectors = new Map<PlatformId, ReturnType<typeof createSimulatedConnector>>([
@@ -67,6 +71,13 @@ beforeAll(async () => {
     payload: DEMO_CREDENTIALS,
   });
   token = login.json().token;
+
+  const admin = await app.inject({
+    method: 'POST',
+    url: '/auth/login',
+    payload: DEMO_ADMIN_CREDENTIALS,
+  });
+  adminToken = admin.json().token;
 });
 
 afterAll(async () => {
@@ -74,6 +85,7 @@ afterAll(async () => {
 });
 
 const auth = (): Record<string, string> => ({ authorization: `Bearer ${token}` });
+const adminAuth = (): Record<string, string> => ({ authorization: `Bearer ${adminToken}` });
 
 describe('santé et catalogue', () => {
   it('répond sur /health', async () => {
@@ -99,13 +111,27 @@ describe('santé et catalogue', () => {
     expect(res.json().oneOffCentsExclVat).toBe(6400);
   });
 
-  it('refuse un devis mal formé', async () => {
+  it('refuse un devis mal formé en 400, pas en 500', async () => {
+    // Une saisie invalide n'est pas une panne serveur : en 500, elle
+    // déclencherait les alertes d'exploitation à chaque formulaire mal rempli.
     const res = await app.inject({
       method: 'POST',
       url: '/catalog/quote',
       payload: { plan: 'diamant' },
     });
-    expect(res.statusCode).toBe(500);
+    expect(res.statusCode).toBe(400);
+    expect(res.json().code).toBe('validation');
+    expect(res.json().fields[0].champ).toBe('plan');
+  });
+
+  it('nomme le champ fautif', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/catalog/quote',
+      payload: { plan: 'pro', tags: 999 },
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().fields.some((f: { champ: string }) => f.champ === 'tags')).toBe(true);
   });
 });
 
@@ -181,6 +207,63 @@ describe('parcours NFC', () => {
   it('renvoie 404 sur une plaquette inconnue', async () => {
     const res = await app.inject({ method: 'GET', url: '/public/tag/inexistant' });
     expect(res.statusCode).toBe(404);
+  });
+
+  it('signale une plaquette sans plateforme active sans crier à la panne', async () => {
+    // Un gérant qui désactive sa seule plateforme produit une configuration
+    // incomplète, pas une erreur serveur. En 500, chaque scan sur une plaquette
+    // mal réglée réveillerait l'astreinte.
+    //
+    // L'établissement est créé pour ce test seul : désactiver une plateforme
+    // d'un établissement partagé casserait les tests de routage suivants.
+    const stamp = Date.now();
+    const created = await app.inject({
+      method: 'POST',
+      url: '/admin/establishments',
+      headers: adminAuth(),
+      payload: {
+        establishment: {
+          name: `Sans plateforme ${stamp}`,
+          sector: 'retail',
+          postalCode: '31000',
+          brandTone: 'sobre et direct',
+          defaultLocale: 'fr',
+        },
+        subscription: {
+          plan: 'essentiel',
+          addons: [],
+          extraPlatforms: 0,
+          tags: 1,
+          committed12Months: true,
+        },
+        manager: {
+          name: 'Testeur Config',
+          email: `config.${stamp}@test.fr`,
+          password: 'motdepasse1',
+        },
+        googleReviewUrl: 'https://g.page/r/config/review',
+        tagLabels: ['Caisse'],
+      },
+    });
+    expect(created.statusCode).toBe(200);
+    const establishmentId = created.json().establishment.id;
+    const slug = created.json().tags[0].slug;
+
+    const disabled = await app.inject({
+      method: 'PUT',
+      url: `/establishments/${establishmentId}/platforms/google`,
+      headers: adminAuth(),
+      payload: { reviewUrl: 'https://g.page/r/config/review', enabled: false },
+    });
+    expect(disabled.statusCode).toBe(200);
+
+    const page = await app.inject({ method: 'GET', url: `/public/tag/${slug}` });
+    expect(page.statusCode).toBe(409);
+    expect(page.json().code).toBe('not_configured');
+    expect(page.json().error).toContain('Google');
+
+    const scan = await app.inject({ method: 'POST', url: `/public/tag/${slug}/scan` });
+    expect(scan.statusCode).toBe(409);
   });
 
   it('enregistre le scan et renvoie une URL de dépôt d’avis', async () => {
@@ -278,8 +361,10 @@ describe('conformité', () => {
       headers: auth(),
       payload: { askRatingBeforeRedirect: true },
     });
-    expect(res.statusCode).toBe(500);
+    // 422 : la requête est bien formée, mais ce qu'elle demande est refusé.
+    expect(res.statusCode).toBe(422);
     expect(res.json().code).toBe('compliance');
+    expect(res.json().error).toContain('review gating');
   });
 
   it('accepte une configuration conforme', async () => {
@@ -469,16 +554,112 @@ describe('plateformes', () => {
   });
 });
 
+describe('cloisonnement entre établissements', () => {
+  it('refuse de marquer lue l’alerte d’un autre établissement', async () => {
+    // L'identifiant d'une alerte suffisait : la route ne vérifiait pas à quel
+    // établissement elle appartenait.
+    const alerts = await app.inject({
+      method: 'GET',
+      url: '/establishments/est_hotel/alerts?limit=1',
+      headers: auth(),
+    });
+    const alertId = alerts.json()[0].id;
+
+    const intruder = await app.inject({
+      method: 'POST',
+      url: '/auth/login',
+      payload: { email: 'intrus@test.fr', password: 'intrus12345' },
+    });
+    // Le compte n'existe pas encore : on le crée via le back-office, sans
+    // aucun établissement rattaché.
+    if (intruder.statusCode !== 200) {
+      await app.inject({
+        method: 'POST',
+        url: '/admin/managers',
+        headers: adminAuth(),
+        payload: {
+          name: 'Intrus',
+          email: 'intrus@test.fr',
+          password: 'intrus12345',
+          role: 'owner',
+          establishmentIds: [],
+        },
+      });
+    }
+    const session = await app.inject({
+      method: 'POST',
+      url: '/auth/login',
+      payload: { email: 'intrus@test.fr', password: 'intrus12345' },
+    });
+    const intruderAuth = { authorization: `Bearer ${session.json().token}` };
+
+    const res = await app.inject({
+      method: 'POST',
+      url: `/alerts/${alertId}/read`,
+      headers: intruderAuth,
+    });
+    expect(res.statusCode).toBe(403);
+  });
+
+  it('laisse le gérant légitime marquer son alerte', async () => {
+    const alerts = await app.inject({
+      method: 'GET',
+      url: '/establishments/est_hotel/alerts?limit=1',
+      headers: auth(),
+    });
+    const res = await app.inject({
+      method: 'POST',
+      url: `/alerts/${alerts.json()[0].id}/read`,
+      headers: auth(),
+    });
+    expect(res.statusCode).toBe(200);
+  });
+
+  it('renvoie 404 sur une alerte inexistante', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/alerts/alr_inexistante/read',
+      headers: auth(),
+    });
+    expect(res.statusCode).toBe(404);
+  });
+});
+
 describe('ingestion', () => {
+  it('réserve le déclenchement des traitements à l’exploitation', async () => {
+    // Ces traitements balaient tout le parc : ouverts à un gérant, ils lui
+    // permettraient de déclencher les appels aux API des plateformes et les
+    // dépenses de modèle de langage de tous les autres établissements.
+    for (const url of ['/ops/ingest', '/ops/trends']) {
+      const legacy = await app.inject({ method: 'POST', url, headers: auth() });
+      expect(legacy.statusCode).toBe(404);
+    }
+    const forbidden = await app.inject({
+      method: 'POST',
+      url: '/admin/ops/ingest',
+      headers: auth(),
+    });
+    expect(forbidden.statusCode).toBe(403);
+  });
+
   it('exécute un cycle complet sans erreur', async () => {
-    const res = await app.inject({ method: 'POST', url: '/ops/ingest', headers: auth() });
+    const res = await app.inject({
+      method: 'POST',
+      url: '/admin/ops/ingest',
+      headers: adminAuth(),
+    });
     expect(res.statusCode).toBe(200);
     expect(res.json().errors).toEqual([]);
-    expect(res.json().establishments).toBe(3);
+    // Au moins les trois du jeu de démonstration : d’autres tests en créent.
+    expect(res.json().establishments).toBeGreaterThanOrEqual(3);
   });
 
   it('n’ingère jamais deux fois le même avis', async () => {
-    const first = await app.inject({ method: 'POST', url: '/ops/ingest', headers: auth() });
+    const first = await app.inject({
+      method: 'POST',
+      url: '/admin/ops/ingest',
+      headers: adminAuth(),
+    });
     const countBefore = (
       await app.inject({
         method: 'GET',
@@ -489,7 +670,11 @@ describe('ingestion', () => {
 
     // Les connecteurs simulés produisent des identifiants uniques : on vérifie
     // ici que le compteur progresse exactement du nombre d'avis annoncés.
-    const second = await app.inject({ method: 'POST', url: '/ops/ingest', headers: auth() });
+    const second = await app.inject({
+      method: 'POST',
+      url: '/admin/ops/ingest',
+      headers: adminAuth(),
+    });
     const countAfter = (
       await app.inject({
         method: 'GET',

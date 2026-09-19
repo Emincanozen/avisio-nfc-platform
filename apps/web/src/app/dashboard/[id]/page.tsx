@@ -4,7 +4,17 @@ import { use, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { API_URL, ApiError, api, clearToken, getToken } from '@/lib/api';
 import type { Alert, EstablishmentDetail, Overview } from '@/lib/types';
-import { Bar, Empty, Kpi, SeverityBadge, Sparkline, percent, relativeDays } from '@/components/ui';
+import {
+  Bar,
+  Empty,
+  Kpi,
+  SeverityBadge,
+  Sparkline,
+  delta as signed,
+  num,
+  percent,
+  relativeDays,
+} from '@/components/ui';
 
 interface Benchmark {
   scope: string;
@@ -115,11 +125,11 @@ export default function OverviewPage({ params }: { params: Promise<{ id: string 
       <section className="kpi">
         <Kpi
           label={`Note moyenne (${overview.windowDays} j)`}
-          value={metrics.averageRating.toFixed(2)}
+          value={num(metrics.averageRating)}
           hint={
             delta === 0
               ? 'stable sur la période précédente'
-              : `${delta > 0 ? '+' : ''}${delta.toFixed(2)} vs période précédente`
+              : `${signed(delta)} vs période précédente`
           }
           tone={delta < -0.1 ? 'critical' : delta > 0.1 ? 'positive' : 'neutral'}
         />
@@ -185,7 +195,7 @@ export default function OverviewPage({ params }: { params: Promise<{ id: string 
                   <div className="spread" style={{ fontSize: 14, marginBottom: 5 }}>
                     <span>{theme.label}</span>
                     <span className="muted">
-                      {theme.mentions} avis · {theme.averageRating.toFixed(1)}/5
+                      {theme.mentions} avis · {num(theme.averageRating, 1)}/5
                     </span>
                   </div>
                   <Bar
@@ -216,7 +226,7 @@ export default function OverviewPage({ params }: { params: Promise<{ id: string 
                   <span>{platform.label}</span>
                   <span className="muted">
                     {platform.reviewCount} avis
-                    {platform.averageRating != null && ` · ${platform.averageRating.toFixed(1)}/5`}
+                    {platform.averageRating != null && ` · ${num(platform.averageRating, 1)}/5`}
                   </span>
                 </div>
                 <Bar share={platform.share} />
@@ -282,11 +292,11 @@ export default function OverviewPage({ params }: { params: Promise<{ id: string 
               <div className="row" style={{ gap: 24 }}>
                 <div>
                   <div className="kpi-label">Vous</div>
-                  <div className="kpi-value">{benchmark.averageRating.self.toFixed(2)}</div>
+                  <div className="kpi-value">{num(benchmark.averageRating.self)}</div>
                 </div>
                 <div>
                   <div className="kpi-label">Médiane des pairs</div>
-                  <div className="kpi-value">{benchmark.averageRating.peerMedian.toFixed(2)}</div>
+                  <div className="kpi-value">{num(benchmark.averageRating.peerMedian)}</div>
                 </div>
                 <div>
                   <div className="kpi-label">Établissements comparés</div>
