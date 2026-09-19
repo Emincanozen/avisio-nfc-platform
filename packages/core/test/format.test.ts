@@ -15,7 +15,7 @@ import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { fr, frPercent, frSigned } from '../src/format.js';
 import { detectThemeTrends } from '../src/trends.js';
-import { computeBenchmark } from '../src/benchmark.js';
+import { computeBenchmark, type PeerSnapshot } from '../src/benchmark.js';
 import type { Review } from '../src/types.js';
 
 describe('écriture des nombres', () => {
@@ -78,13 +78,12 @@ describe('textes destinés au gérant', () => {
   });
 
   it('écrit le résumé du benchmark en français', () => {
-    const peers = Array.from({ length: 8 }, (_, i) => ({
+    const peers: PeerSnapshot[] = Array.from({ length: 8 }, (_, i) => ({
       establishmentId: `est_peer_${i}`,
       sector: 'restaurant',
       postalCode: '31200',
       averageRating: 3.5 + i * 0.1,
-      reviewCount: 40,
-      monthlyReviews: 6,
+      reviewsLast30Days: 6,
       replyRate: 0.7,
     }));
 
@@ -94,8 +93,7 @@ describe('textes destinés au gérant', () => {
         sector: 'restaurant',
         postalCode: '31200',
         averageRating: 4.21,
-        reviewCount: 50,
-        monthlyReviews: 8,
+        reviewsLast30Days: 8,
         replyRate: 0.9,
       },
       peers,
