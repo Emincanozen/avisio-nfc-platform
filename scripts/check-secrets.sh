@@ -25,7 +25,10 @@ trouve=0
 
 signaler() {
   echo "SECRET POSSIBLE — $1"
-  echo "$2" | head -5
+  # Chaîne d'entrée plutôt que tube : `head` referme le tube avant la fin de
+  # `echo`, et l'erreur d'écriture polluait le rapport d'un « Broken pipe »
+  # au milieu d'une alerte de sécurité.
+  head -5 <<< "$2"
   echo ""
   trouve=1
 }
@@ -98,9 +101,18 @@ fi
 echo ""
 echo "3. Historique Git"
 # `git log -p` sur tout l'historique : un secret retiré depuis reste ici.
-historique=$(git log -p --all --no-color 2>/dev/null || true)
+#
+# Ce script est exclu par chemin, et non plus en filtrant les lignes qui
+# contiennent « check-secrets ». Ce filtre-là ne voyait que le nom du
+# fichier : la ligne de diff qui ajoute l'appât ne le porte pas, donc
+# l'appât se signalait lui-même. Il l'a fait, et la CI l'a refuse.
+#
+# Exclure ce fichier est assumé : son métier est de contenir des motifs en
+# forme de secret. Un vrai secret collé ici passerait — mais il passerait
+# déjà avec l'ancien filtre, et la section 1 l'excluait aussi.
+historique=$(git log -p --all --no-color -- . ':!scripts/check-secrets.sh' 2>/dev/null || true)
 for nom in "${!MOTIFS[@]}"; do
-  resultat=$(echo "$historique" | grep -nP "${MOTIFS[$nom]}" 2>/dev/null | grep -v 'check-secrets' || true)
+  resultat=$(grep -nP "${MOTIFS[$nom]}" <<< "$historique" 2>/dev/null || true)
   [ -n "$resultat" ] && signaler "$nom (historique)" "$resultat"
 done
 [ "$trouve" -eq 0 ] && echo "   aucun"
