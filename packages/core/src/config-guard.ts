@@ -23,6 +23,19 @@ export const DEMO_JWT_SECRET = 'dev-secret-change-me-in-production-0123456789';
 /** Longueur minimale d'un secret de signature digne de ce nom. */
 export const MIN_SECRET_LENGTH = 32;
 
+/**
+ * Identité d'émetteur par défaut, portée par `.env.example`.
+ *
+ * Ce ne sont pas des réglages de confort : une facture sans SIRET ni numéro
+ * de TVA valides n'est pas une facture. Le client peut refuser de la régler,
+ * ne peut pas déduire la TVA, et l'émetteur s'expose à une amende par
+ * mention manquante (art. L.441-9 du code de commerce).
+ */
+export const PLACEHOLDER_COMPANY = {
+  siret: '000 000 000 00000',
+  vatNumber: 'FR00000000000',
+} as const;
+
 export interface RuntimeConfig {
   nodeEnv: string;
   databaseUrl: string;
@@ -31,6 +44,8 @@ export interface RuntimeConfig {
   webUrl: string;
   apiUrl: string;
   demoMode: boolean;
+  /** Identité de l'émetteur, portée par chaque facture. */
+  company: { name: string; address: string; siret: string; vatNumber: string };
   /** Fournisseurs configurés, pour vérifier la cohérence des options activées. */
   providers: {
     anthropic: boolean;
@@ -108,6 +123,42 @@ export function productionConfigProblems(config: RuntimeConfig): ConfigProblem[]
           `« ${url} » n'est pas en HTTPS. Le push web l'exige — sans lui, aucune ` +
           'alerte ne parvient au téléphone du gérant — et les jetons de session ' +
           'transiteraient en clair.',
+      });
+    }
+  }
+
+  // Identité de l'émetteur. Le produit facture dès le premier client : une
+  // API de production qui démarre avec le SIRET d'exemple émet des factures
+  // légalement invalides, et rien ne le signale — la facture sort, le PDF
+  // est propre, le client la reçoit. On ne s'en aperçoit qu'au moment où il
+  // la refuse, ou au contrôle.
+  if (!config.company.siret || config.company.siret === PLACEHOLDER_COMPANY.siret) {
+    problems.push({
+      setting: 'COMPANY_SIRET',
+      reason:
+        "Absent ou laissé à l'exemple. Les factures émises porteraient un SIRET " +
+        'fictif : le client peut refuser de les régler, et une mention ' +
+        'obligatoire manquante est sanctionnée (art. L.441-9 c. com.).',
+    });
+  }
+
+  if (!config.company.vatNumber || config.company.vatNumber === PLACEHOLDER_COMPANY.vatNumber) {
+    problems.push({
+      setting: 'COMPANY_VAT',
+      reason:
+        "Absent ou laissé à l'exemple. Sans numéro de TVA valide, le client ne " +
+        'peut pas déduire la TVA qu’on lui facture.',
+    });
+  }
+
+  for (const [setting, valeur] of [
+    ['COMPANY_NAME', config.company.name],
+    ['COMPANY_ADDRESS', config.company.address],
+  ] as const) {
+    if (!valeur.trim()) {
+      problems.push({
+        setting,
+        reason: "Absent : c'est une mention obligatoire de toute facture française.",
       });
     }
   }

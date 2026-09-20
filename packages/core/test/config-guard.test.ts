@@ -10,6 +10,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   DEMO_JWT_SECRET,
+  PLACEHOLDER_COMPANY,
   formatConfigRefusal,
   productionConfigProblems,
   productionConfigWarnings,
@@ -24,6 +25,12 @@ const saine = (over: Partial<RuntimeConfig> = {}): RuntimeConfig => ({
   webUrl: 'https://app.avisio.fr',
   apiUrl: 'https://api.avisio.fr',
   demoMode: false,
+  company: {
+    name: 'Avisio SAS',
+    address: '12 rue des Minimes, 31200 Toulouse',
+    siret: '912 345 678 00019',
+    vatNumber: 'FR12912345678',
+  },
   providers: { anthropic: true, googleOAuth: true, email: true, push: true },
   ...over,
 });
@@ -118,6 +125,59 @@ describe('en production', () => {
     // ferait perdre une demi-journée.
     const problemes = causes(saine({ databaseUrl: '', jwtSecret: '', webUrl: 'http://x.fr' }));
     expect(problemes.length).toBeGreaterThanOrEqual(3);
+  });
+
+  describe("identité de l'émetteur sur les factures", () => {
+    /**
+     * Le produit facture dès le premier client. Démarrer avec le SIRET
+     * d'exemple émet des factures légalement invalides sans que rien ne le
+     * signale : la facture sort, le PDF est propre, le client la reçoit. On
+     * ne l'apprend qu'au refus de paiement, ou au contrôle.
+     */
+    it("refuse le SIRET laissé à l'exemple", () => {
+      expect(causes(saine({ company: { ...saine().company, siret: PLACEHOLDER_COMPANY.siret } })))
+        .toContain('COMPANY_SIRET');
+    });
+
+    it('refuse un SIRET absent', () => {
+      expect(causes(saine({ company: { ...saine().company, siret: '' } }))).toContain(
+        'COMPANY_SIRET',
+      );
+    });
+
+    it("refuse le numéro de TVA laissé à l'exemple", () => {
+      // Sans numéro de TVA valide, le client ne peut pas déduire la TVA
+      // qu'on lui facture : la facture lui coûte 20 % de plus que prévu.
+      expect(
+        causes(saine({ company: { ...saine().company, vatNumber: PLACEHOLDER_COMPANY.vatNumber } })),
+      ).toContain('COMPANY_VAT');
+    });
+
+    it("refuse une raison sociale ou une adresse vide", () => {
+      expect(causes(saine({ company: { ...saine().company, name: '  ' } }))).toContain(
+        'COMPANY_NAME',
+      );
+      expect(causes(saine({ company: { ...saine().company, address: '' } }))).toContain(
+        'COMPANY_ADDRESS',
+      );
+    });
+
+    it("laisse passer une identité renseignée", () => {
+      expect(causes(saine())).not.toContain('COMPANY_SIRET');
+      expect(causes(saine())).not.toContain('COMPANY_VAT');
+    });
+
+    it("ne bloque pas le développement avec l'identité d'exemple", () => {
+      // Le mode dégradé reste la bonne propriété hors production : on ne va
+      // pas exiger un SIRET réel pour lancer une démonstration.
+      expect(
+        productionConfigProblems({
+          ...saine(),
+          nodeEnv: 'development',
+          company: { ...saine().company, siret: PLACEHOLDER_COMPANY.siret },
+        }),
+      ).toEqual([]);
+    });
   });
 });
 

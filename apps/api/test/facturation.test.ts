@@ -226,6 +226,112 @@ describe('prorata d’un changement d’offre', () => {
   });
 });
 
+describe('modèle de période — comportement constaté, à trancher', () => {
+  /**
+   * Ces cas ne disent pas ce qui *devrait* se passer : ils fixent ce qui se
+   * passe, pour que personne ne le change sans le vouloir.
+   *
+   * Le modèle est incohérent, et c'est constaté, pas supposé : la première
+   * facture couvre le mois **à venir**, toutes les suivantes couvrent le mois
+   * **écoulé**. Il en découle un trou de deux mois entre la première et la
+   * deuxième facture, puis un décalage permanent d'un mois à l'encaissement.
+   *
+   * Aucun mois n'est facturé deux fois et aucun n'est oublié : ce n'est pas
+   * une perte d'argent, c'est une base de facturation mixte. Trancher entre
+   * « tout à échoir » et « tout à terme échu » engage le contrat client et la
+   * trésorerie — ce n'est pas une décision technique, elle revient au
+   * propriétaire. D'ici là, le comportement est verrouillé ici.
+   */
+  const souscrire = async (repo: Repository, debut: string) => {
+    const { notifier } = notifierMuet();
+    const facturation = createBillingService({ repo, notifier, logger: silencieux });
+    const etablissement = await repo.establishments.create({
+      id: generateId('est'),
+      name: 'Client témoin',
+      postalCode: '69001',
+      sector: 'restaurant',
+      plan: 'essentiel',
+      addons: [],
+      committed12Months: false,
+      brandTone: 'professionnel et courtois',
+      defaultLocale: 'fr',
+      createdAt: debut,
+    });
+    await facturation.subscribe({
+      establishmentId: etablissement.id,
+      plan: 'essentiel',
+      addons: [],
+      extraPlatforms: 0,
+      tags: 1,
+      committed12Months: false,
+      now: debut,
+    });
+    return { facturation, etablissement };
+  };
+
+  const DEBUT = '2026-01-10T12:00:00.000Z';
+
+  it('facture la première période à échoir, les suivantes à terme échu', async () => {
+    const repo = createMemoryRepository({ seed: false });
+    const { facturation, etablissement } = await souscrire(repo, DEBUT);
+
+    for (let mois = 1; mois <= 4; mois += 1) {
+      await facturation.runBilling(addMonths(DEBUT, mois));
+    }
+
+    const factures = (await repo.invoices.listByEstablishment(etablissement.id)).sort((a, b) =>
+      a.number.localeCompare(b.number),
+    );
+
+    const echue = (f: (typeof factures)[number]): boolean =>
+      new Date(f.periodEnd).getTime() <= new Date(f.issuedAt).getTime();
+
+    expect(echue(factures[0]!)).toBe(false); // à échoir
+    expect(factures.slice(1).every(echue)).toBe(true); // toutes échues
+  });
+
+  it('laisse deux mois entre la première et la deuxième facture', async () => {
+    const repo = createMemoryRepository({ seed: false });
+    const { facturation, etablissement } = await souscrire(repo, DEBUT);
+
+    for (let mois = 1; mois <= 4; mois += 1) {
+      await facturation.runBilling(addMonths(DEBUT, mois));
+    }
+
+    const factures = (await repo.invoices.listByEstablishment(etablissement.id)).sort((a, b) =>
+      a.number.localeCompare(b.number),
+    );
+    const jours = Math.round(
+      (new Date(factures[1]!.issuedAt).getTime() - new Date(factures[0]!.issuedAt).getTime()) /
+        86_400_000,
+    );
+
+    // Le client paie à la souscription, puis plus rien pendant deux mois. Il
+    // le remarque, et c'est le genre d'anomalie qui fait douter d'une facture.
+    expect(jours).toBeGreaterThan(50);
+  });
+
+  it('ne facture aucun mois deux fois, et n’en oublie aucun', async () => {
+    const repo = createMemoryRepository({ seed: false });
+    const { facturation, etablissement } = await souscrire(repo, DEBUT);
+
+    for (let mois = 1; mois <= 6; mois += 1) {
+      await facturation.runBilling(addMonths(DEBUT, mois));
+    }
+
+    const factures = (await repo.invoices.listByEstablishment(etablissement.id)).sort((a, b) =>
+      a.periodStart.localeCompare(b.periodStart),
+    );
+
+    // Le point rassurant : la base est mixte, mais la couverture est
+    // continue. Aucune periode a cheval, aucun mois saute.
+    for (let i = 1; i < factures.length; i += 1) {
+      expect(factures[i]!.periodStart).toBe(factures[i - 1]!.periodEnd);
+    }
+    expect(new Set(factures.map((f) => f.periodStart)).size).toBe(factures.length);
+  });
+});
+
 describe('ce que la correction ne doit pas casser', () => {
   it('facture bien la période suivante le mois d’après', async () => {
     const repo = createMemoryRepository({ seed: false });

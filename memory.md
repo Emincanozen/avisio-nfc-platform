@@ -416,6 +416,33 @@ le test intermittent de limitation de débit est élucidé.
 (6 contrôles ajoutés sur une table qui n'avait jamais vu PostgreSQL),
 **56/56** de bout en bout avec l'API compilée.
 
+**P2.7 — modèle de période : incohérence constatée, décision à prendre.**
+Simulé sur douze mois : la **première** facture couvre le mois à venir
+(terme à échoir), **toutes les suivantes** le mois écoulé (terme échu). D'où
+un trou de 59 jours entre la première et la deuxième facture, puis un
+décalage permanent d'un mois à l'encaissement.
+
+Aucun mois n'est facturé deux fois, aucun n'est oublié, la couverture est
+continue : ce n'est pas une perte d'argent, c'est une base de facturation
+mixte. Trancher entre « tout à échoir » et « tout à terme échu » engage le
+contrat client et la trésorerie — **décision du propriétaire, pas
+technique**. Le comportement est verrouillé par trois tests en attendant,
+pour qu'il ne dérive pas sans qu'on le veuille.
+
+**P2.9 — identité de l'émetteur.** Les mentions obligatoires étaient déjà
+là (pénalités L.441-10, indemnité D.441-5, TVA, échéance, numérotation),
+mais rien n'empêchait la production de démarrer avec le SIRET d'exemple
+`000 000 000 00000` : les factures sortaient légalement invalides sans
+qu'aucun signal ne l'indique. Le contrôle de configuration les refuse
+désormais. Vérifié en exécutant le serveur compilé : refus, sortie 78, les
+deux causes nommées.
+
+**Reste ouvert sur P2.9** : la facture ne porte que la raison sociale et le
+code postal du client, alors que le droit exige son adresse complète.
+`Establishment` n'a pas de champ adresse — à ajouter au modèle, aux deux
+adaptateurs, à l'onboarding et au jeu de démonstration. Noté dans
+`docs/etat-des-lieux.md`.
+
 ### Session du 20 septembre 2026 (2) — défauts P1 : sécurité, droits, intégrité
 
 Quatre défauts de priorité 1, signalés par un audit externe, **vérifiés dans
@@ -612,14 +639,20 @@ verrouillait le compte dont il avait besoin. Voir D12.
 
 ### Prochaine action concrète
 
-**P2.7 — clarifier le modèle de période.** P1, P2.5, P2.6 et P2.8 sont
-corrigés, testés et poussés. Reste à trancher ce que `currentPeriodStart` et
-`currentPeriodEnd` désignent exactement au regard de la facturation à terme
-échu ou à échoir, et à le documenter — plusieurs lectures cohabitent
-aujourd'hui dans le code.
+**Deux décisions attendent le propriétaire, aucune n'est technique :**
 
-Puis : mentions légales des factures (P2.9). En parallèle et indépendant du
-code : demande d'accès Google (priorité 1.1, délai long), déploiement (1.2).
+1. **Base de facturation (P2.7)** — tout à échoir, ou tout à terme échu ?
+   Aujourd'hui c'est mixte. Cela engage le contrat client et la trésorerie.
+2. **Adresse complète du client sur la facture (reste de P2.9)** — champ à
+   ajouter, ce qui touche le formulaire d'onboarding.
+
+Côté code, la suite est **P3** : identifiants Google au format
+`accounts/{id}/locations/{id}` (P3.10) et curseur de synchronisation sur
+`updateTime` (P3.11). Puis P4 : fidélité découplée de l'avis, HMAC caisse,
+outbox de notifications, plafond IA concurrent.
+
+En parallèle et indépendant du code : demande d'accès Google (priorité 1.1,
+délai long), déploiement (1.2).
 
 ---
 

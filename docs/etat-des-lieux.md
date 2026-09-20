@@ -142,6 +142,7 @@ du service de push simulé est auto-signé. **À ne jamais utiliser en productio
 | Fonctionnalité | Pourquoi | Effort estimé |
 |---|---|---|
 | Encaissement automatique (mandat SEPA) | Demande un contrat prestataire | 1 à 2 semaines |
+| **Adresse complète du client sur la facture** | La facture ne porte que la raison sociale et le code postal. Le droit français exige l'adresse complète de l'acheteur. `Establishment` n'a pas de champ voie/ville : il faut l'ajouter au modèle, aux deux adaptateurs, au formulaire d'onboarding et au jeu de démonstration | 1 jour |
 | Envoi de SMS | Demande un contrat opérateur | 3 à 5 jours |
 | Résumé hebdomadaire | Canal prévu, contenu à composer | 2 à 3 jours |
 | Plaquettes physiques | Hors périmètre logiciel, traité séparément | — |

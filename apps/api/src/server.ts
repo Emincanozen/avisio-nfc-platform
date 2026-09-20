@@ -38,6 +38,7 @@ const runtimeConfig = {
   webUrl: env.webUrl,
   apiUrl: env.apiUrl,
   demoMode: env.demoMode,
+  company: env.company,
   providers: {
     anthropic: capabilities.llm,
     googleOAuth: capabilities.googleOAuth,
