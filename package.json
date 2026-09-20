@@ -21,7 +21,7 @@
     "db:down": "docker compose -f infra/docker-compose.yml down",
     "db:push": "prisma db push --schema apps/api/prisma/schema.prisma",
     "db:studio": "prisma studio --schema apps/api/prisma/schema.prisma",
-    "seed": "tsx apps/api/src/scripts/seed.ts"
+    "seed": "tsx --conditions=development apps/api/src/scripts/seed.ts"
   },
   "devDependencies": {
     "@types/node": "^22.10.2",

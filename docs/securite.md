@@ -202,6 +202,48 @@ ne se règle jamais correctement.
 
 Voir `docs/conformite.md` pour le cadre réglementaire.
 
+## 8 bis. Dépendances vulnérables
+
+Relevé du 20 septembre 2026, `npm audit`. **Les deux entrées critiques sont
+corrigées.** Les sept restantes sont analysées ici plutôt que masquées : une
+gravité annoncée n'est pas une exploitabilité.
+
+### Corrigé
+
+| Paquet | Gravité | Correctif |
+|---|---|---|
+| `@fastify/jwt` 9.1.0 → **10.2.2** | **critique** | Montée de version majeure, `fast-jwt` 6.3.3 |
+| `fast-jwt` ≤ 6.2.3 | **critique** | Entraîné par le précédent |
+
+Six avis concernaient `fast-jwt`. Seul le contournement d'authentification par
+secret HMAC vide aurait pu nous toucher, et encore : `env.jwtSecret` a toujours
+une valeur de repli, il n'est jamais vide. Les autres visaient des
+configurations que nous n'utilisons pas — clés RSA (nous signons en HMAC),
+cache `cacheKeyBuilder` (non activé), expressions régulières dans `allowedIss`
+et consorts (non renseignés). **La montée de version a quand même été faite :
+c'est la dépendance qui porte l'authentification, le doute n'y est pas
+acceptable.** Vérifiée par 323 tests, le démarrage de l'API compilée et
+54 contrôles de bout en bout.
+
+### Restant, sans correctif applicable
+
+| Paquets | Gravité | Exploitabilité ici | Pourquoi pas corrigé |
+|---|---|---|---|
+| `prisma`, `@prisma/config`, `deepmerge-ts` | haute | **Nulle.** Épuisement de pile en fusionnant un graphe récursif, au chargement de configuration par la **CLI Prisma**. Notre `schema.prisma` est statique et versionné | Aucune version corrigée n'existe : l'avis couvre tout Prisma 6 et 7, le correctif est annoncé pour 8.1.0, non publié |
+| `postcss`, `next` | haute / modérée | **Nulle.** Lecture de fichiers `.map` via un `sourceMappingURL` contrôlé par l'attaquant, **à la compilation**. Notre CSS est écrit par nous et vit dans le dépôt : il faudrait déjà pouvoir y committer | Correctif = `next@16`, montée majeure. Risque de régression réel pour une menace qui n'existe pas dans ce montage |
+| `vitest`, `@vitest/mocker` | modérée | **Nulle.** Traversée de chemin via le serveur de développement de Vitest. Dépendance de développement, jamais livrée | Correctif = `vitest@5`, montée majeure |
+
+### Ce que cela implique
+
+Aucune de ces sept entrées n'est atteignable depuis le réseau en production :
+ce sont des outils de compilation, de ligne de commande ou de test. Elles
+méritent d'être suivies, pas d'être corrigées dans l'urgence au prix d'une
+montée majeure non testée.
+
+**À refaire** : `npm audit` à chaque revue de dépendances, et relire ce tableau.
+Si une de ces entrées devient atteignable à l'exécution, elle change de
+catégorie. L'ajout de `npm audit` à l'intégration continue reste à faire (§9).
+
 ## 9. Ce qui reste ouvert
 
 Nommé, pas caché.

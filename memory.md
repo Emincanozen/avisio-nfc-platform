@@ -9,7 +9,7 @@ Mémoire structurée et durable, destinée à toute intelligence artificielle
 reprenant Avisio. Ce n'est pas une transcription de conversations : c'est
 l'état, les décisions et ce qui reste.
 
-**Dernière mise à jour : 19 septembre 2026, commit `4e5b14b`.**
+**Dernière mise à jour : 20 septembre 2026.**
 
 ---
 
@@ -61,7 +61,7 @@ l'argumentaire commercial.
 
 | Indicateur | Valeur | Commande |
 |---|---|---|
-| Tests | 317, tous verts | `npm test` |
+| Tests | 323, tous verts | `npm test` |
 | Typecheck | passe, `src` + `test` + `scripts` | `npm run typecheck` |
 | Build de production | passe | `npm run build` |
 | Bout en bout sur PostgreSQL | 54 / 54 | `node scripts/smoke-test.mjs` |
@@ -238,6 +238,26 @@ Google n'a pas approuvé l'accès — et il restera utile pour les plateformes
 sans API ouverte. La distinction interdit qu'un chiffre du tableau de bord
 laisse croire à une connexion en direct qui n'existe pas.
 
+### D13 — Le paquet Core expose du JavaScript compilé, pas sa source
+
+`exports` : `default` vers `./dist/index.js`, `types` vers
+`./dist/index.d.ts`, `development` vers `./src/index.ts`.
+
+*Pourquoi* : **`exports` prime sur `main`** dans la résolution ESM de Node.
+Les faire diverger a mis l'intégration continue en panne avec 323 tests verts
+— Vitest lit la source, et la panne n'existe qu'à l'exécution du JavaScript
+compilé. C'est le genre de défaut qu'aucune suite de tests unitaires ne peut
+attraper.
+
+*Ce qu'il ne faut pas faire* : repointer `exports` sur `src` « parce que c'est
+plus pratique en développement ». C'est exactement la régression.
+`packages/core/test/packaging.test.ts` la refuse désormais, et
+`--conditions=development` couvre le besoin réel du développement.
+
+*Contrôle* : supprimer `packages/core/dist`, puis `npm test`. Les 323 tests
+doivent passer — ce qui prouve que Vitest lit bien la source et non un `dist`
+périmé.
+
 ### D12 — Une connexion réussie remet le compteur à zéro
 
 *Pourquoi* : le budget de connexion existe pour ralentir qui devine un mot de
@@ -260,6 +280,50 @@ fausse l'analyse de sentiment.
 ---
 
 ## 4. Travail effectué
+
+### Session du 20 septembre 2026 — réparation de l'intégration continue
+
+**La cause.** `packages/core/package.json` déclarait `main: ./dist/index.js`
+mais `exports` pointait sur `./src/index.ts`. Dans la résolution ESM de Node,
+**`exports` l'emporte sur `main`** : l'API compilée chargeait donc du
+TypeScript. Deux symptômes selon la version de Node — avant 22.18,
+`ERR_UNKNOWN_FILE_EXTENSION` sur le `.ts` ; à partir de 22.18, Node dépouille
+les types tout seul, franchit `index.ts`, puis échoue sur
+`export * from './types.js'` parce qu'il n'existe pas de `src/types.js`,
+seulement `src/types.ts`. D'où le `ERR_MODULE_NOT_FOUND` vu en CI.
+
+**Pourquoi 317 tests verts ne l'ont pas vu.** Vitest lit la source. La panne
+n'existe qu'en exécutant le JavaScript compilé — ce que seul le job PostgreSQL
+faisait. Le défaut a voyagé jusqu'en CI avec une suite entièrement verte.
+
+**Le correctif.** Exports conditionnels : `default` → `./dist/index.js`,
+`types` → `./dist/index.d.ts`, `development` → `./src/index.ts`. Node en
+production ne connaît pas `development` et prend donc le compilé. tsx et
+Vitest activent la condition et gardent la source, sans exiger de build
+préalable — mesuré : les scripts `dev`/`seed` passent
+`--conditions=development` (tsx ne l'active pas seul, vérifié), et
+`vitest.config.ts` la déclare explicitement plutôt que de s'en remettre à un
+défaut de Vite qui pourrait changer.
+
+**Second défaut, découvert en reproduisant la CI localement.**
+`npx tsx scripts/pg-verify.mts` tourne **avant** l'étape de compilation :
+sans `--conditions=development`, il partait sur un `dist` inexistant. La CI
+aurait donc échoué une étape plus tôt que rapporté. Corrigé dans le workflow.
+
+**Vulnérabilités.** `npm audit` signalait 9 entrées, dont 2 critiques.
+`@fastify/jwt` 9.1.0 → **10.2.2** (majeure, `fast-jwt` 6.3.3) élimine les deux
+critiques. Restent 7 entrées sans correctif applicable, analysées au §5.
+
+**Vérifié.** 323 tests (6 ajoutés), typecheck 0 erreur, build propre, API
+**compilée** démarrée sur PostgreSQL 16 isolé, 54/54 de bout en bout, 18/18 sur
+l'adaptateur Prisma, chaîne de notification 10/10.
+
+**Non élucidé.** Le test intermittent signalé la veille n'a pas été reproduit :
+14 passages consécutifs de la suite complète, dont 4 sous charge CPU
+artificielle (12 à 16 processus). L'hypothèse d'un dépassement de délai est
+**infirmée** — le test le plus lent passe de 2 070 à 2 319 ms sous charge, pour
+un délai de 5 000 ms. Cause inconnue. Aucun correctif spéculatif n'a été
+appliqué. Si l'échec reparaît, le journal de CI nommera le test.
 
 ### Session du 19 septembre 2026
 

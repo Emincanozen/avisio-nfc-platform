@@ -95,19 +95,44 @@ jobs:
 
       # Exerce le SQL brut de la limitation de débit — y compris sous
       # concurrence — les connexions Google et la colonne de provenance.
+      #
+      # `--conditions=development` : ce script lit l'adaptateur en TypeScript,
+      # qui importe `@avisio/core`. Sans la condition, la résolution part sur
+      # `dist`, qui n'est pas encore construit à cette étape.
       - name: Vérification de l'adaptateur
-        run: npx tsx scripts/pg-verify.mts
+        run: npx tsx --conditions=development scripts/pg-verify.mts
 
-      - name: Démarrage de l'API
+      # Étape décisive : elle exécute le JavaScript COMPILÉ, seul endroit où
+      # se manifeste un `exports` de paquet mal orienté. Les 323 tests
+      # tournent sur la source et ne peuvent pas l'attraper.
+      - name: Démarrage de l'API compilée
         run: |
+          set -euo pipefail
           npm run build -w @avisio/core
           npm run build -w @avisio/api
-          node apps/api/dist/server.js &
+
+          node apps/api/dist/server.js > /tmp/api.log 2>&1 &
+          api_pid=$!
+
           for i in $(seq 1 30); do
-            if curl -sf http://localhost:4000/health > /dev/null; then break; fi
+            if curl -sf http://localhost:4000/health > /dev/null; then
+              echo "API compilée démarrée après ${i}s"
+              curl -sf http://localhost:4000/health
+              exit 0
+            fi
+            # Un processus mort ne répondra jamais : inutile d'attendre 30 s
+            # pour afficher ensuite un échec de curl qui ne dit rien.
+            if ! kill -0 "$api_pid" 2>/dev/null; then
+              echo "::error::L'API compilée s'est arrêtée au démarrage."
+              cat /tmp/api.log
+              exit 1
+            fi
             sleep 1
           done
-          curl -sf http://localhost:4000/health
+
+          echo "::error::L'API compilée n'a pas répondu en 30 s."
+          cat /tmp/api.log
+          exit 1
 
       # 54 contrôles par le réseau, contre un serveur réel sur PostgreSQL.
       - name: Test de bout en bout

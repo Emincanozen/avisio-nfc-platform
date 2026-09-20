@@ -5,12 +5,29 @@
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
+  "//": [
+    "`exports` prime sur `main` dans la résolution ESM de Node. Il pointait sur",
+    "./src/index.ts : l'API compilée chargeait donc du TypeScript, ce qui casse",
+    "de deux façons selon la version de Node. Avant 22.18 :",
+    "ERR_UNKNOWN_FILE_EXTENSION sur le .ts. À partir de 22.18, Node dépouille",
+    "les types tout seul, franchit index.ts, puis échoue sur",
+    "`export * from './types.js'` — il n'existe pas de src/types.js, seulement",
+    "src/types.ts. D'où ERR_MODULE_NOT_FOUND vu en intégration continue.",
+    "",
+    "La condition `development` garde la source pour tsx et Vitest, qui ne",
+    "doivent pas exiger une compilation préalable. Node en production ne",
+    "l'active pas et prend donc le JavaScript compilé."
+  ],
   "exports": {
     ".": {
-      "types": "./src/index.ts",
-      "default": "./src/index.ts"
+      "types": "./dist/index.d.ts",
+      "development": "./src/index.ts",
+      "default": "./dist/index.js"
     }
   },
+  "files": [
+    "dist"
+  ],
   "scripts": {
     "build": "tsc -b"
   }
