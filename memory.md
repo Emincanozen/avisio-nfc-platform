@@ -1,5 +1,10 @@
 # memory.md — mémoire du projet
 
+> **Nouveau sur ce projet ?** Lis [`INDEX.md`](INDEX.md) d'abord : il dit
+> quoi lire selon ce que tu viens faire, et surtout quoi ne pas lire. La
+> documentation complète pèse ~36 500 jetons ; tu en as rarement besoin de plus
+> de 3 000.
+
 Mémoire structurée et durable, destinée à toute intelligence artificielle
 reprenant Avisio. Ce n'est pas une transcription de conversations : c'est
 l'état, les décisions et ce qui reste.

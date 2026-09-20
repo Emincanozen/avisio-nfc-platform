@@ -17,6 +17,12 @@ facturation et les traitements de fond.
 
 ---
 
+## Reprendre ce projet
+
+[](INDEX.md) dit quoi lire selon ce qu'on vient faire — et surtout
+quoi ne pas lire. La documentation complète pèse ~36 500 jetons ; on en a
+rarement besoin de plus de 3 000.
+
 ## Démarrage
 
 ```bash

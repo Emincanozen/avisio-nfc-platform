@@ -1,5 +1,10 @@
 # Passation — Avisio
 
+> **Nouveau sur ce projet ?** Lis [`INDEX.md`](INDEX.md) d'abord : il dit
+> quoi lire selon ce que tu viens faire, et surtout quoi ne pas lire. La
+> documentation complète pèse ~36 500 jetons ; tu en as rarement besoin de plus
+> de 3 000.
+
 **À l'IA ou au développeur qui reprend ce projet.** Lis ce fichier en entier
 avant de toucher au code. Il tient en dix minutes et t'évitera de refaire ce
 qui est fait, ou de défaire ce qui est voulu.
@@ -46,8 +51,7 @@ l'argumentaire commercial.
 
 > `CLAUDE.md` et `AGENTS.md` ont le même contenu, pour que différents agents
 > trouvent leurs instructions. **Si tu modifies l'un, modifie l'autre** —
-> sinon ils divergent en silence. `AGENTS.md` n'est pas encore suivi par Git :
-> `git add AGENTS.md` si tu veux le versionner.
+> sinon ils divergent en silence.
 
 ## 3. Les cinq choses à savoir avant d'écrire une ligne
 

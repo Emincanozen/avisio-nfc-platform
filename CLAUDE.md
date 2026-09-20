@@ -1,5 +1,10 @@
 # CLAUDE.md — instructions de travail sur Avisio
 
+> **Nouveau sur ce projet ?** Lis [`INDEX.md`](INDEX.md) d'abord : il dit
+> quoi lire selon ce que tu viens faire, et surtout quoi ne pas lire. La
+> documentation complète pèse ~36 500 jetons ; tu en as rarement besoin de plus
+> de 3 000.
+
 Lire aussi `memory.md` (état réel, décisions, tâches en cours) et `cloud.md`
 (guide technique complet). **Avant toute modification d'architecture, lire
 `cloud.md` et `docs/architecture.md`.**
