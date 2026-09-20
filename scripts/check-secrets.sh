@@ -15,6 +15,12 @@
 
 set -uo pipefail
 
+# `grep -P` refuse de fonctionner hors locale unibyte ou UTF-8 : il écrit
+# « -P supports only unibyte and UTF-8 locales » et rend la main en échec.
+# Les appels ci-dessous avalent les erreurs, donc ce refus se lirait « aucun
+# secret » — la panne la plus dangereuse pour un contrôle de sécurité.
+export LC_ALL=${LC_ALL:-C.UTF-8}
+
 trouve=0
 
 signaler() {
@@ -30,6 +36,19 @@ signaler() {
 # (« password= ») produiraient trop de faux positifs pour être lus, et un
 # contrôle qu'on ne lit plus ne sert à rien.
 
+# Mots de passe manifestement fictifs, tolérés dans une URL de base.
+#
+# Un vrai mot de passe n'est jamais littéralement « motdepasse ». Les jeux
+# d'essai en ont besoin — le contrôle de configuration se teste avec une URL
+# complète — et les signaler use l'attention sur du bruit, jusqu'à ce que
+# plus personne ne lise la sortie.
+#
+# La liste est fermée et exige le mot de passe *entier* : « motdepasse2024 »
+# reste signalé. Le risque résiduel assumé est qu'un jour une vraie base
+# porte l'un de ces mots comme mot de passe — auquel cas le problème n'est
+# pas qu'on ne l'ait pas détecté ici.
+FICTIFS='motdepasse|password|changeme|secret|exemple|example|xxxxxx+'
+
 declare -A MOTIFS=(
   ["clé API Anthropic"]='sk-ant-[A-Za-z0-9_-]{20,}'
   ["clé API OpenAI"]='sk-[A-Za-z0-9]{32,}'
@@ -39,8 +58,24 @@ declare -A MOTIFS=(
   ["clé AWS"]='AKIA[0-9A-Z]{16}'
   ["jeton GitHub"]='gh[pousr]_[A-Za-z0-9]{30,}'
   ["clé privée PEM"]='-----BEGIN [A-Z ]*PRIVATE KEY-----'
-  ["URL de base avec mot de passe"]='postgres(ql)?://[^:/@[:space:]]+:[^@[:space:]]{6,}@(?!localhost|127\.0\.0\.1)'
+  ["URL de base avec mot de passe"]='postgres(ql)?://[^:/@[:space:]]+:(?!('"$FICTIFS"')@)[^@[:space:]]{6,}@(?!localhost|127\.0\.0\.1)'
 )
+
+# --- Le contrôle se contrôle lui-même ---------------------------------------
+#
+# Chaque recherche plus bas finit par `2>/dev/null || true` : une erreur de
+# grep devient un résultat vide, donc « aucun secret ». Un scanner muet passe
+# au vert en ne cherchant rien, et fabrique une confiance qu'il ne mérite pas.
+#
+# On lui soumet donc un appât dont on connaît la réponse. S'il ne le voit
+# pas, le moteur est cassé et le reste de la sortie ne veut rien dire.
+appat='postgresql://avisio:Xk9mQ2vT7pL@db.exemple.net:5432/prod'
+if ! echo "$appat" | grep -qP "${MOTIFS["URL de base avec mot de passe"]}" 2>/dev/null; then
+  echo "ÉCHEC : grep -P ne détecte pas l'appât de contrôle." >&2
+  echo "Le moteur d'expressions régulières est indisponible ou mal configuré." >&2
+  echo "Ce script ne peut rien garantir dans cet état : on s'arrête ici." >&2
+  exit 2
+fi
 
 echo "1. Fichiers suivis"
 for nom in "${!MOTIFS[@]}"; do

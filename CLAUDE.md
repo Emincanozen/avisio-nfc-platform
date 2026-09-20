@@ -172,6 +172,11 @@ Lire `docs/securite.md`. Les quatre règles qui s'appliquent à chaque ligne :
 - Messages de commit en français, à l'impératif, expliquant **pourquoi** le
   changement était nécessaire — pas ce qu'il fait, le diff le dit déjà.
 - Ne jamais committer sans que `npm test` et `npm run typecheck` passent.
+- **`check-secrets.sh` se lance après `git add`, jamais avant.** Sa première
+  section interroge les fichiers *suivis* : un fichier neuf lui est invisible
+  tant qu'il n'est pas indexé. Lancé trop tôt, il annonce « aucun secret »
+  sans avoir regardé le fichier qu'on s'apprête justement à committer. C'est
+  arrivé le 21 septembre 2026 ; seule l'intégration continue l'a vu.
 
 ## Critères de qualité
 
