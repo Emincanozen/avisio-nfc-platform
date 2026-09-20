@@ -4,8 +4,19 @@
  * Deux tâches planifiées :
  *  - `runBilling` : émet les factures des abonnements dont la période est
  *    échue, puis fait rouler la période. Idempotent — une période déjà
- *    facturée ne l'est pas deux fois, parce que la période avance dans la même
- *    opération que l'émission.
+ *    facturée ne l'est pas deux fois.
+ *
+ *    Ce commentaire affirmait déjà l'idempotence avant le 21 septembre 2026,
+ *    « parce que la période avance dans la même opération que l'émission ».
+ *    Ce n'était pas le cas : c'étaient deux écritures séparées, sans
+ *    transaction. Deux cycles qui se chevauchaient facturaient le même mois
+ *    deux fois, avec deux numéros légaux valides. Reproduit contre
+ *    PostgreSQL réel, 69,60 € au lieu de 34,80 €.
+ *
+ *    L'idempotence repose maintenant sur une contrainte d'unicité
+ *    `(subscriptionId, periodStart)` et une vraie transaction, pas sur
+ *    l'ordre des instructions. Une affirmation dans un commentaire ne
+ *    protège personne.
  *  - `runDunning` : relances et suspension des impayés.
  *
  * L'encaissement passe par un port `PaymentProvider`. L'adaptateur fourni est
@@ -66,6 +77,13 @@ export const manualPaymentProvider: PaymentProvider = {
 export interface BillingReport {
   invoicesIssued: number;
   totalCents: number;
+  /**
+   * Périodes trouvées échues mais déjà facturées — cycle rejoué, cycle
+   * concurrent, reprise après panne. Compté à part plutôt que passé sous
+   * silence : un chiffre qui monte ici signale un ordonnanceur qui se
+   * chevauche, ce qu'on veut voir avant que ce soit un incident.
+   */
+  alreadyBilled: number;
   errors: string[];
 }
 
@@ -86,12 +104,19 @@ export function createBillingService(deps: Deps) {
   const { repo, notifier, logger } = deps;
   const payments = deps.payments ?? manualPaymentProvider;
 
-  /** Émet la facture d'une période et fait avancer l'abonnement. */
+  /**
+   * Émet la facture d'une période et fait avancer l'abonnement.
+   *
+   * `created` vaut `false` quand la période était déjà facturée — appel
+   * rejoué, cycle concurrent, reprise après panne. Rien n'a été écrit, et
+   * l'appelant ne doit ni compter cette facture dans son rapport ni la
+   * représenter au client.
+   */
   async function invoiceSubscription(
     subscription: Subscription,
     now: string,
     options: { includeOneOff?: boolean } = {},
-  ): Promise<Invoice> {
+  ): Promise<{ invoice: Invoice; created: boolean }> {
     const year = new Date(now).getUTCFullYear();
     const draft = buildInvoice({
       subscription,
@@ -103,15 +128,21 @@ export function createBillingService(deps: Deps) {
       ...(options.includeOneOff ? { includeOneOff: true } : {}),
     });
 
-    const invoice = await repo.invoices.create(draft, year);
-
-    // La période avance immédiatement : c'est ce qui rend le traitement
-    // rejouable sans risque de double facturation.
+    // Émission et avance de période dans une seule transaction, arbitrée par
+    // la contrainte d'unicité `(subscriptionId, periodStart)`. Deux cycles
+    // concurrents ne peuvent plus produire deux factures du même mois : le
+    // perdant se voit rendre celle du gagnant.
     const period = nextPeriod(subscription);
-    await repo.subscriptions.update(subscription.id, {
-      currentPeriodStart: period.start,
-      currentPeriodEnd: period.end,
+    const { invoice, created } = await repo.invoices.issueForPeriod(draft, year, {
+      subscriptionId: subscription.id,
+      periodStart: period.start,
+      periodEnd: period.end,
     });
+
+    // Déjà facturée : ni encaissement, ni courriel. Réencaisser ferait payer
+    // deux fois, et renvoyer l'avis d'échéance inquiéterait un client qui a
+    // déjà reçu le sien — pour beaucoup, un second avis veut dire impayé.
+    if (!created) return { invoice, created: false };
 
     const establishment = await repo.establishments.findById(subscription.establishmentId);
     if (establishment) {
@@ -133,7 +164,7 @@ export function createBillingService(deps: Deps) {
       }
     }
 
-    return invoice;
+    return { invoice, created: true };
   }
 
   return {
@@ -167,7 +198,7 @@ export function createBillingService(deps: Deps) {
         currentPeriodEnd: addMonths(now, 1),
       });
 
-      const invoice = await invoiceSubscription(subscription, now, { includeOneOff: true });
+      const { invoice } = await invoiceSubscription(subscription, now, { includeOneOff: true });
       return { subscription, invoice };
     },
 
@@ -243,7 +274,12 @@ export function createBillingService(deps: Deps) {
     /** Cycle de facturation : toutes les périodes échues. */
     async runBilling(now = new Date().toISOString()): Promise<BillingReport> {
       const due = await repo.subscriptions.listDue(now);
-      const report: BillingReport = { invoicesIssued: 0, totalCents: 0, errors: [] };
+      const report: BillingReport = {
+        invoicesIssued: 0,
+        totalCents: 0,
+        alreadyBilled: 0,
+        errors: [],
+      };
 
       for (const subscription of due) {
         if (subscription.cancelAt && new Date(subscription.cancelAt).getTime() <= new Date(now).getTime()) {
@@ -252,9 +288,15 @@ export function createBillingService(deps: Deps) {
           continue;
         }
         try {
-          const invoice = await invoiceSubscription(subscription, now);
-          report.invoicesIssued += 1;
-          report.totalCents += invoice.totalCents;
+          const { invoice, created } = await invoiceSubscription(subscription, now);
+          // Une période déjà facturée ne gonfle pas le rapport : sinon un
+          // cycle rejoué afficherait un chiffre d'affaires qui n'existe pas.
+          if (created) {
+            report.invoicesIssued += 1;
+            report.totalCents += invoice.totalCents;
+          } else {
+            report.alreadyBilled += 1;
+          }
         } catch (error) {
           report.errors.push(`${subscription.establishmentId}: ${(error as Error).message}`);
         }

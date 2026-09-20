@@ -332,6 +332,42 @@ export function createMemoryRepository(options: { seed?: boolean } = {}): Reposi
         invoices.set(created.id, created);
         return created;
       },
+      /**
+       * Équivalent mémoire de la contrainte `(subscriptionId, periodStart)`.
+       *
+       * JavaScript n'exécute qu'une chose à la fois et il n'y a pas d'`await`
+       * entre la recherche et l'insertion : la séquence est donc atomique
+       * pour les mêmes raisons qu'une transaction. Ce qui compte ici est que
+       * la *règle* soit la même qu'en production — sans quoi le mode
+       * démonstration facturerait autrement que la vraie base, et le défaut
+       * ne se verrait qu'une fois chez le client.
+       */
+      async issueForPeriod(invoice, year, advance) {
+        const existante = [...invoices.values()].find(
+          (i) => i.subscriptionId === invoice.subscriptionId && i.periodStart === invoice.periodStart,
+        );
+        if (existante) return { invoice: existante, created: false };
+
+        const next = (invoiceCounters.get(year) ?? 0) + 1;
+        invoiceCounters.set(year, next);
+        const created: Invoice = {
+          ...invoice,
+          id: nextId('inv'),
+          number: formatInvoiceNumber(year, next),
+        };
+        invoices.set(created.id, created);
+
+        const abonnement = subscriptions.get(advance.subscriptionId);
+        if (abonnement) {
+          subscriptions.set(advance.subscriptionId, {
+            ...abonnement,
+            currentPeriodStart: advance.periodStart,
+            currentPeriodEnd: advance.periodEnd,
+          });
+        }
+
+        return { invoice: created, created: true };
+      },
       async findById(id) {
         return invoices.get(id) ?? null;
       },

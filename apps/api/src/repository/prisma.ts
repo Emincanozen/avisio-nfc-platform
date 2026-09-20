@@ -510,6 +510,60 @@ export async function createPrismaRepository(): Promise<Repository> {
           return toInvoice(row);
         });
       },
+      /**
+       * Facture une période et fait avancer l'abonnement, atomiquement.
+       *
+       * On tente l'insertion sans rien vérifier avant : c'est la contrainte
+       * `(subscriptionId, periodStart)` qui arbitre, et elle seule peut le
+       * faire sans course. Une lecture préalable rouvrirait exactement la
+       * fenêtre que ce code ferme.
+       */
+      async issueForPeriod(invoice, year, advance) {
+        try {
+          return await db.$transaction(async (tx) => {
+            const counter = await tx.invoiceCounter.upsert({
+              where: { year },
+              create: { year, sequence: 1 },
+              update: { sequence: { increment: 1 } },
+            });
+            const sequence = Number(counter.sequence);
+            const row = await tx.invoice.create({
+              data: {
+                ...fromInvoice(invoice),
+                id: `inv_${year}_${sequence}`,
+                number: formatInvoiceNumber(year, sequence),
+              },
+            });
+
+            // Dans la même transaction : une facture émise sur une période
+            // qui n'avance pas serait refacturée à chaque cycle suivant.
+            await tx.subscription.update({
+              where: { id: advance.subscriptionId },
+              data: {
+                currentPeriodStart: new Date(advance.periodStart),
+                currentPeriodEnd: new Date(advance.periodEnd),
+              },
+            });
+
+            return { invoice: toInvoice(row), created: true };
+          });
+        } catch (error) {
+          if (!estViolationUnicite(error, 'subscriptionId')) throw error;
+
+          // Un autre cycle a gagné la course. Sa transaction est déjà
+          // validée, donc la facture existe : on renvoie la sienne. Le
+          // compteur de numérotation a été annulé avec la transaction, la
+          // séquence légale reste sans trou.
+          const existante = await db.invoice.findFirst({
+            where: {
+              subscriptionId: invoice.subscriptionId,
+              periodStart: new Date(invoice.periodStart),
+            },
+          });
+          if (!existante) throw error;
+          return { invoice: toInvoice(existante), created: false };
+        }
+      },
       async findById(id) {
         const row = await db.invoice.findUnique({ where: { id } });
         return row ? toInvoice(row) : null;
@@ -1083,3 +1137,26 @@ function toPosCredential(row: Row): PosCredentialRecord {
 
 const stripUndefined = (obj: Row): Row =>
   Object.fromEntries(Object.entries(obj).filter(([, v]) => v !== undefined));
+
+/**
+ * Violation d'une contrainte d'unicité portant sur `champ`.
+ *
+ * Prisma code `P2002` et place les colonnes fautives dans `meta.target`. On
+ * exige le champ attendu : une insertion peut violer *une autre* contrainte
+ * — un numéro de facture en double serait un défaut de numérotation, pas une
+ * période déjà facturée, et le confondre avec une idempotence réussie
+ * masquerait une vraie corruption de la séquence légale.
+ */
+function estViolationUnicite(error: unknown, champ: string): boolean {
+  if (typeof error !== 'object' || error === null) return false;
+  const { code, meta } = error as { code?: unknown; meta?: unknown };
+  if (code !== 'P2002') return false;
+
+  const cible = (meta as { target?: unknown } | undefined)?.target;
+  // `target` est un tableau de colonnes sur PostgreSQL, mais une chaîne sur
+  // d'autres moteurs et selon les versions : on accepte les deux plutôt que
+  // de dépendre d'une forme qui a déjà changé.
+  if (Array.isArray(cible)) return cible.includes(champ);
+  if (typeof cible === 'string') return cible.includes(champ);
+  return false;
+}

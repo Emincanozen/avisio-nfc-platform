@@ -328,7 +328,66 @@ Google est injoignable punirait le gérant d'une panne qui n'est pas la sienne.
 *Défaut par défaut* : `nextStatus(..., 'publish')` sans issue précisée renvoie
 `reply_pending`. Un appelant étourdi obtient le statut prudent, pas le flatteur.
 
+### D17 — L'idempotence de la facturation tient à une contrainte, pas à du code
+
+*Pourquoi* : le service affirmait en commentaire être idempotent « parce que
+la période avance dans la même opération que l'émission ». C'étaient deux
+écritures séparées, sans transaction. Deux cycles qui se chevauchaient
+facturaient le même mois deux fois, avec deux numéros légaux valides.
+Reproduit contre PostgreSQL réel : 69,60 € au lieu de 34,80 €.
+
+*La règle est dans la base* : `@@unique([subscriptionId, periodStart])`. Le
+code applicatif ne la double pas, il s'en sert — la violation de contrainte
+*est* le signal « déjà facturée ». Une vérification préalable en lecture
+rouvrirait exactement la course qu'on ferme.
+
+*Mesuré* : en retirant l'index sur la base réelle, quatre cycles concurrents
+produisent quatre factures. Avec lui, une seule. La garantie vient de la
+contrainte, pas du `try/catch`.
+
+*Émission et avance de période sont une seule transaction.* Séparées, une
+panne entre les deux laissait une facture émise sur une période qui
+n'avançait jamais : refacturée à chaque cycle suivant.
+
+*Le numéro est rendu quand la transaction échoue* : le compteur est
+incrémenté dans la même transaction, donc annulé avec elle. Vérifié — la
+séquence légale ne se troue pas, même après trois courses perdues.
+
+*Corollaire de conception* : une facture émise n'est jamais ni supprimée ni
+réécrite. Le port n'expose aucune suppression, et `update` ne laisse passer
+que `status`, `paidAt`, `paymentReference` et `remindersSent`. Ni montant, ni
+lignes, ni période, ni numéro.
+
 ## 4. Travail effectué
+
+### Session du 21 septembre 2026 — P2.5 : double facturation sous concurrence
+
+**Reproduit avant d'être corrigé**, contre PostgreSQL réel : deux
+`runBilling` simultanés sur un abonnement échu produisent deux factures pour
+la même période, chacune numérotée légalement. 69,60 € au lieu de 34,80 €.
+Il ne faut rien d'exotique pour y arriver — le cron qui traîne pendant que
+l'exploitant clique « lancer la facturation » suffit.
+
+Corrigé par une contrainte d'unicité et une vraie transaction, voir **D17**.
+
+**Vérifié** : 384 tests (7 ajoutés), typecheck et build sans erreur, **30/30**
+sur `pg-verify` contre PostgreSQL 16 (7 contrôles de facturation ajoutés,
+dont quatre cycles réellement concurrents), **56/56** de bout en bout avec
+l'API compilée. La reproduction d'origine, rejouée après correctif, donne
+une seule facture.
+
+**Preuve que la protection protège** : index retiré de la base réelle → 4
+factures pour la même période, 4 contrôles en échec. Index remis → 1 facture.
+La garantie est bien dans la base.
+
+**Note de déploiement** : appliquer cette contrainte à une base contenant
+déjà des doublons échoue. Il faut les résoudre d'abord — décision comptable,
+pas technique : une facture déjà envoyée ne se supprime pas sans avoir. Voir
+`docs/deploiement.md`.
+
+**Aussi corrigé chemin faisant** : le contrôle de secrets pouvait passer au
+vert sans rien chercher (voir la section sécurité de `docs/securite.md`), et
+le test intermittent de limitation de débit est élucidé.
 
 ### Session du 20 septembre 2026 (2) — défauts P1 : sécurité, droits, intégrité
 
@@ -526,14 +585,15 @@ verrouillait le compte dont il avait besoin. Voir D12.
 
 ### Prochaine action concrète
 
-**P2.5 — double facturation sous concurrence.** Le dépôt privé existe, les
-défauts P1 sont corrigés et poussés. Le suivant par criticité est
-l'idempotence de la facturation : à reproduire avant de corriger, puis à
-tenir par des contraintes en base, pas seulement par du code applicatif.
+**P2.6 — prorata persisté.** P1 et P2.5 sont corrigés, testés et poussés.
+`changePlan` calcule des lignes de prorata et les **jette** : elles ne sont
+écrites nulle part, donc la facture suivante ne les portera pas. Un
+changement d'offre en cours de mois n'est aujourd'hui facturé ni dans un
+sens ni dans l'autre.
 
-Puis, dans l'ordre : prorata persisté (P2.6), modèle de période (P2.7),
-mentions légales des factures (P2.9). En parallèle et indépendant du code :
-demande d'accès Google (priorité 1.1, délai long), déploiement (1.2).
+Puis, dans l'ordre : modèle de période (P2.7), mentions légales des factures
+(P2.9). En parallèle et indépendant du code : demande d'accès Google
+(priorité 1.1, délai long), déploiement (1.2).
 
 ---
 

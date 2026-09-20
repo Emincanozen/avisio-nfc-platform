@@ -243,6 +243,156 @@ try {
       surGoogle.every((r) => r.platform === 'google'),
     );
   }
+
+  // -------------------------------------------------------------------------
+  section('Facturation : une periode, une facture');
+
+  // La suite de tests prouve la regle sur l'adaptateur memoire, ou rien ne
+  // s'execute vraiment en parallele. Ici seulement, deux transactions
+  // PostgreSQL se disputent la meme periode et c'est la contrainte
+  // d'unicite qui tranche. C'est le seul endroit ou ce defaut se reproduit
+  // pour de bon : il avait ete constate a 69,60 EUR au lieu de 34,80 EUR.
+  {
+    const { createBillingService } = await import('../apps/api/src/services/billing.ts');
+    const { generateId, addMonths } = await import('../packages/core/src/index.ts');
+
+    const muet = { info: () => {}, warn: () => {} };
+    const sansCourrier = {
+      billing: async () => {},
+      alert: async () => {},
+      monthlyReport: async () => {},
+    };
+    const facturation = createBillingService({ repo, notifier: sansCourrier, logger: muet });
+
+    const etab = await repo.establishments.create({
+      id: generateId('est'),
+      name: `Verification ${marker}`,
+      postalCode: '69001',
+      sector: 'restaurant',
+      plan: 'essentiel',
+      addons: [],
+      committed12Months: false,
+      brandTone: 'professionnel et courtois',
+      defaultLocale: 'fr',
+      createdAt: new Date().toISOString(),
+    });
+
+    const instant = new Date().toISOString();
+    await repo.subscriptions.create({
+      id: generateId('sub'),
+      establishmentId: etab.id,
+      plan: 'essentiel',
+      addons: [],
+      extraPlatforms: 0,
+      tags: 1,
+      committed12Months: false,
+      status: 'active',
+      startedAt: addMonths(instant, -1),
+      currentPeriodStart: addMonths(instant, -1),
+      currentPeriodEnd: instant,
+    });
+
+    // Etat de la numerotation avant la course. `runBilling` facture tous les
+    // abonnements echus, pas seulement le notre : on raisonne donc sur des
+    // ecarts, jamais sur des numeros consecutifs.
+    const rangDe = (f) => Number(f.number.split('-').at(-1));
+    const avantToutes = await repo.invoices.listAll();
+    const rangMaxAvant = Math.max(0, ...avantToutes.map(rangDe));
+    const nombreAvant = avantToutes.length;
+
+    // Quatre cycles simultanes, pas deux : un seul gagnant doit sortir quel
+    // que soit le nombre de concurrents, et deux cycles pourraient se
+    // serialiser par chance.
+    const cycles = await Promise.all([
+      facturation.runBilling(instant),
+      facturation.runBilling(instant),
+      facturation.runBilling(instant),
+      facturation.runBilling(instant),
+    ]);
+
+    const factures = await repo.invoices.listByEstablishment(etab.id);
+    check(
+      'quatre cycles concurrents emettent une seule facture',
+      factures.length === 1,
+      `${factures.length} facture(s) : ${factures.map((f) => f.number).join(', ')}`,
+    );
+
+    const emises = cycles.reduce((t, c) => t + c.invoicesIssued, 0);
+    check('un seul cycle se declare emetteur', emises === 1, `${emises} cycle(s)`);
+
+    const erreurs = cycles.flatMap((c) => c.errors);
+    check(
+      'les cycles perdants n echouent pas, ils reconnaissent',
+      erreurs.length === 0,
+      erreurs.join(' | '),
+    );
+
+    // Une contrainte qui bloque aussi le cas legitime serait une panne, pas
+    // une protection.
+    const moisSuivant = await facturation.runBilling(addMonths(instant, 1));
+    check(
+      'la periode suivante est bien facturee',
+      moisSuivant.invoicesIssued >= 1,
+      `${moisSuivant.invoicesIssued} facture(s)`,
+    );
+
+    const apres = await repo.invoices.listByEstablishment(etab.id);
+    check(
+      'deux periodes distinctes, deux factures',
+      new Set(apres.map((f) => f.periodStart)).size === apres.length,
+      `${apres.length} facture(s) pour ${new Set(apres.map((f) => f.periodStart)).size} periode(s)`,
+    );
+
+    // La transaction annulee doit rendre le numero qu'elle avait reserve.
+    // Sinon chaque course perdue troue la sequence legale, qui doit rester
+    // continue — et trois cycles perdants par mois, c'est trois trous.
+    //
+    // On compare l'avance du compteur au nombre de factures reellement
+    // creees. Egalite : aucun numero gaspille. C'est verifiable sans
+    // supposer que nos factures se suivent, ce qu'elles ne font pas.
+    //
+    // Le rang le plus eleve sert de lecture du compteur, faute de methode
+    // dediee dans le port. Cela suppose qu'aucune facture n'a ete supprimee
+    // depuis : une suppression manuelle en base fait echouer ce controle a
+    // tort, ce qui est arrive une fois en mettant ce script au point. Aucun
+    // code de production ne supprime de facture — c'est une piece
+    // comptable — donc l'hypothese tient partout ailleurs.
+    const toutesApres = await repo.invoices.listAll();
+    const avanceCompteur = Math.max(0, ...toutesApres.map(rangDe)) - rangMaxAvant;
+    const facturesCreees = toutesApres.length - nombreAvant;
+    check(
+      'aucun numero gaspille par les courses perdues',
+      avanceCompteur === facturesCreees,
+      `compteur +${avanceCompteur} pour ${facturesCreees} facture(s) creee(s)`,
+    );
+
+    // La contrainte elle-meme, verifiee directement : le code applicatif
+    // pourrait la contourner sans qu'on le sache.
+    const premiere = apres[0];
+    let refusee = false;
+    try {
+      await repo.invoices.create(
+        {
+          establishmentId: premiere.establishmentId,
+          subscriptionId: premiere.subscriptionId,
+          status: 'open',
+          periodStart: premiere.periodStart,
+          periodEnd: premiere.periodEnd,
+          issuedAt: instant,
+          dueAt: premiere.dueAt,
+          lines: premiere.lines,
+          subtotalCents: premiere.subtotalCents,
+          vatCents: premiere.vatCents,
+          totalCents: premiere.totalCents,
+          remindersSent: 0,
+        },
+        new Date(instant).getUTCFullYear(),
+      );
+    } catch {
+      refusee = true;
+    }
+    check('la base refuse elle-meme un doublon de periode', refusee);
+  }
 } finally {
   // Nettoyage : ce script ne laisse rien derriere lui.
   await repo.close().catch(() => undefined);

@@ -200,6 +200,34 @@ Retour arrière : `git checkout <commit précédent> && npm ci && npm run build`
 puis redémarrer. Une migration de schéma, elle, ne se défait pas ainsi — d'où
 la sauvegarde.
 
+### Contrainte d'unicité sur les factures (21 septembre 2026)
+
+Cette version ajoute `@@unique([subscriptionId, periodStart])` sur
+`invoices`. Sur une base contenant déjà deux factures pour la même période,
+**`prisma db push` échoue** — et c'est voulu : la commande refuse plutôt que
+de choisir à votre place laquelle garder.
+
+Chercher les doublons avant la mise à jour :
+
+```sql
+SELECT "subscriptionId", "periodStart", count(*), string_agg(number, ', ')
+FROM invoices
+GROUP BY 1, 2
+HAVING count(*) > 1;
+```
+
+Si la requête ne renvoie rien, la mise à jour passe sans rien faire de
+particulier. Prisma réclamera quand même `--accept-data-loss` : le drapeau
+est mal nommé ici, il n'autorise aucune suppression, il accepte seulement
+qu'une contrainte soit ajoutée. Vérifier que la requête ci-dessus est vide
+**avant** de le passer.
+
+Si elle renvoie des lignes, **ne pas les supprimer**. Une facture déjà
+envoyée à un client est une pièce comptable : elle s'annule par un avoir, pas
+par un `DELETE`. C'est une décision comptable, à prendre avec la personne qui
+tient les comptes — et, si le client a été prélevé deux fois, elle
+s'accompagne d'un remboursement.
+
 ## 6. Sauvegarde et restauration
 
 Tout l'état est dans PostgreSQL. Les fichiers sont reconstructibles depuis le

@@ -210,6 +210,27 @@ export interface Repository {
      * C'est cette atomicité qui garantit une séquence sans trou.
      */
     create(invoice: Omit<Invoice, 'id' | 'number'>, year: number): Promise<Invoice>;
+    /**
+     * Facture une période et fait avancer l'abonnement, en une seule
+     * transaction. **Idempotent** : si la période est déjà facturée, rien
+     * n'est créé, la période n'avance pas une seconde fois, et la facture
+     * existante est renvoyée avec `created: false`.
+     *
+     * Les deux écritures sont indissociables. Séparées, elles laissaient
+     * deux fenêtres : deux cycles concurrents facturaient la même période
+     * avant que l'un des deux ne fasse avancer l'abonnement, et une panne
+     * entre les deux écritures laissait une facture émise sur une période
+     * qui n'avançait jamais — donc refacturée à chaque passage suivant.
+     *
+     * L'appelant ne vérifie pas l'existence au préalable : lire puis écrire
+     * est précisément la course qu'on cherche à fermer. C'est l'écriture
+     * qui tranche.
+     */
+    issueForPeriod(
+      invoice: Omit<Invoice, 'id' | 'number'>,
+      year: number,
+      advance: { subscriptionId: string; periodStart: string; periodEnd: string },
+    ): Promise<{ invoice: Invoice; created: boolean }>;
     findById(id: string): Promise<Invoice | null>;
     listByEstablishment(establishmentId: string): Promise<Invoice[]>;
     listAll(): Promise<Invoice[]>;

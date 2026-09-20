@@ -320,6 +320,15 @@ model Invoice {
 
   @@index([establishmentId, issuedAt])
   @@index([status, dueAt])
+  // Une période, une facture. C'est la seule garantie qui tienne quel que
+  // soit le nombre de processus : deux cycles de facturation concurrents
+  // produisaient deux factures valides pour le même mois, chacune avec son
+  // numéro légal, et le client était prélevé deux fois. Reproduit le
+  // 21 septembre 2026 contre PostgreSQL réel avant correction.
+  //
+  // Le code applicatif s'appuie dessus plutôt que de la doubler : la
+  // violation de contrainte *est* le signal « déjà facturée ».
+  @@unique([subscriptionId, periodStart])
   @@map("invoices")
 }
 
