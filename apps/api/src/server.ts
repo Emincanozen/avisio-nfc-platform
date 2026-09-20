@@ -14,9 +14,47 @@
  * facturerait de son côté. Voir docs/architecture.md.
  */
 
+import { formatConfigRefusal, productionConfigProblems, productionConfigWarnings } from '@avisio/core';
 import { buildApp } from './app.js';
-import { describeMode, env } from './env.js';
+import { capabilities, describeMode, env } from './env.js';
 import { createRepository } from './repository/index.js';
+
+/**
+ * Contrôle de configuration, avant toute connexion.
+ *
+ * Il tourne en premier, avant même d'ouvrir la base : un déploiement mal
+ * configuré doit s'arrêter net, pas démarrer à moitié. Chacun des cas refusés
+ * produisait un serveur qui **a l'air de fonctionner** — sans base, il sert le
+ * jeu de démonstration et ses identifiants publics ; avec le secret de
+ * développement, il accepte n'importe quel jeton forgé.
+ *
+ * Voir packages/core/src/config-guard.ts pour la liste et les motifs.
+ */
+const runtimeConfig = {
+  nodeEnv: env.nodeEnv,
+  databaseUrl: env.databaseUrl,
+  jwtSecret: env.jwtSecret,
+  secretsKey: env.secretsKey,
+  webUrl: env.webUrl,
+  apiUrl: env.apiUrl,
+  demoMode: env.demoMode,
+  providers: {
+    anthropic: capabilities.llm,
+    googleOAuth: capabilities.googleOAuth,
+    email: capabilities.email,
+    push: capabilities.push,
+  },
+};
+
+const problems = productionConfigProblems(runtimeConfig);
+if (problems.length > 0) {
+  process.stderr.write(formatConfigRefusal(problems));
+  process.exit(78); // EX_CONFIG : erreur de configuration, pas de logiciel
+}
+
+for (const warning of productionConfigWarnings(runtimeConfig)) {
+  process.stderr.write(`Avertissement — ${warning.setting} : ${warning.reason}\n`);
+}
 
 const repo = await createRepository();
 const app = await buildApp({ repo });

@@ -41,7 +41,16 @@ export interface ReviewMetrics {
   overdueCount: number;
 }
 
-export function computeMetrics(reviews: Review[], now = new Date()): ReviewMetrics {
+/**
+ * Indicateurs d'un ensemble d'avis.
+ *
+ * Les avis de démonstration sont écartés d'entrée. Ils existent pour dérouler
+ * le produit devant un prospect ; les faire entrer dans une note moyenne ou un
+ * taux de réponse reviendrait à montrer un chiffre inventé — et le filtrage
+ * ici plutôt que chez chaque appelant garantit qu'aucun n'oubliera.
+ */
+export function computeMetrics(input: Review[], now = new Date()): ReviewMetrics {
+  const reviews = countableOnly(input);
   const distribution: Record<1 | 2 | 3 | 4 | 5, number> = { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 };
   let ratingSum = 0;
   let negativeCount = 0;
@@ -107,16 +116,49 @@ export function ratingTrend(
 }
 
 /** Transition d'état autorisée pour un avis. */
-export function nextStatus(current: ReviewStatus, action: 'draft' | 'publish' | 'ignore'): ReviewStatus {
+/**
+ * Transition de statut.
+ *
+ * `publish` ne mène plus systématiquement à `answered`. C'est la correction
+ * d'un défaut : la réponse était marquée publiée même quand la plateforme
+ * n'était pas connectée et que rien n'était parti. Trois issues distinctes
+ * désormais, selon ce qui s'est réellement passé côté plateforme.
+ */
+export function nextStatus(
+  current: ReviewStatus,
+  action: 'draft' | 'publish' | 'ignore',
+  /**
+   * Issue de la tentative de publication. Obligatoire en pratique pour
+   * `publish` ; `pending` par défaut, qui est le choix prudent — on ne
+   * suppose jamais qu'une publication a réussi.
+   */
+  outcome: 'confirmed' | 'pending' | 'failed' = 'pending',
+): ReviewStatus {
   switch (action) {
     case 'draft':
       return current === 'answered' ? 'answered' : 'draft_ready';
     case 'publish':
-      return 'answered';
+      if (outcome === 'confirmed') return 'answered';
+      return outcome === 'failed' ? 'reply_failed' : 'reply_pending';
     case 'ignore':
       return current === 'answered' ? 'answered' : 'ignored';
   }
 }
+
+/** Une réponse a-t-elle été réellement publiée et confirmée ? */
+export function isPublished(review: Pick<Review, 'status'>): boolean {
+  return review.status === 'answered';
+}
+
+/** Libellés français des statuts, pour l'interface et les rapports. */
+export const REVIEW_STATUS_LABELS: Record<ReviewStatus, string> = {
+  new: 'À traiter',
+  draft_ready: 'Suggestion prête',
+  reply_pending: 'Réponse en attente de publication',
+  answered: 'Réponse publiée',
+  reply_failed: 'Publication refusée',
+  ignored: 'Ignoré',
+};
 
 const clampRating = (rating: number): 1 | 2 | 3 | 4 | 5 =>
   Math.min(5, Math.max(1, Math.round(rating))) as 1 | 2 | 3 | 4 | 5;
@@ -134,4 +176,21 @@ function median(values: number[]): number {
   const mid = Math.floor(sorted.length / 2);
   if (sorted.length % 2 === 1) return sorted[mid]!;
   return (sorted[mid - 1]! + sorted[mid]!) / 2;
+}
+
+/**
+ * L'avis compte-t-il dans une metrique montree au client ?
+ *
+ * Faux pour les avis fabriques par le connecteur simule. Ils existent pour
+ * derouler le produit en demonstration ; les faire entrer dans une note
+ * moyenne, un taux de reponse ou un rapport mensuel reviendrait a vendre un
+ * chiffre invente.
+ */
+export function isCountable(review: Pick<Review, 'source'>): boolean {
+  return review.source !== 'demo';
+}
+
+/** Ecarte les avis de demonstration d'une liste avant tout calcul. */
+export function countableOnly<T extends Pick<Review, 'source'>>(reviews: T[]): T[] {
+  return reviews.filter(isCountable);
 }

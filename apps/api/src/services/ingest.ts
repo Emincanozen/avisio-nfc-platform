@@ -11,9 +11,10 @@
  */
 
 import {
+  resolveEntitlements,
+  hasEntitlement,
   detectThemeTrends,
   generateId,
-  hasFeature,
   shouldAlert,
   type Alert,
   type Establishment,
@@ -124,7 +125,11 @@ export function createIngestService(deps: Deps) {
 
     // L'alerte temps réel est une fonctionnalité facturée : sans le droit,
     // l'avis reste visible dans le dashboard mais ne réveille personne.
-    if (hasFeature(establishment.plan, establishment.addons, 'negative_alerts')) {
+    const droits = resolveEntitlements(
+      await repo.subscriptions.findByEstablishment(establishment.id),
+      establishment,
+    );
+    if (hasEntitlement(droits, 'negative_alerts')) {
       for (const email of await managerEmails(establishment.id)) {
         await notifier.alert(email, establishment, created, review);
       }
@@ -138,7 +143,11 @@ export function createIngestService(deps: Deps) {
    * et réémettre l'alerte à chaque passage ferait fuir le gérant.
    */
   async function detectTrends(establishment: Establishment): Promise<Alert[]> {
-    if (!hasFeature(establishment.plan, establishment.addons, 'nlp_themes')) return [];
+    const droits = resolveEntitlements(
+      await repo.subscriptions.findByEstablishment(establishment.id),
+      establishment,
+    );
+    if (!hasEntitlement(droits, 'nlp_themes')) return [];
 
     const reviews = await repo.reviews.query({
       establishmentId: establishment.id,

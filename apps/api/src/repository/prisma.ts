@@ -560,6 +560,10 @@ export async function createPrismaRepository(): Promise<Repository> {
         });
         return toPushSubscription(row);
       },
+      async findByEndpoint(endpoint) {
+        const row = await db.pushSubscription.findUnique({ where: { endpoint } });
+        return row ? toPushSubscription(row) : null;
+      },
       async listByManager(managerId) {
         const rows = await db.pushSubscription.findMany({ where: { managerId } });
         return rows.map(toPushSubscription);

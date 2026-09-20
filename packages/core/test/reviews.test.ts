@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { bucketOf, computeMetrics, nextStatus, ratingTrend, shouldAlert } from '../src/reviews.js';
+import {
+  bucketOf,
+  computeMetrics,
+  isPublished,
+  nextStatus,
+  ratingTrend,
+  shouldAlert,
+} from '../src/reviews.js';
 import type { Review } from '../src/types.js';
 
 const NOW = new Date('2026-09-17T12:00:00.000Z');
@@ -102,7 +109,30 @@ describe('nextStatus', () => {
 
   it('suit le cycle nominal', () => {
     expect(nextStatus('new', 'draft')).toBe('draft_ready');
-    expect(nextStatus('draft_ready', 'publish')).toBe('answered');
+    // `answered` exige une confirmation de la plateforme, rien de moins.
+    expect(nextStatus('draft_ready', 'publish', 'confirmed')).toBe('answered');
     expect(nextStatus('new', 'ignore')).toBe('ignored');
+  });
+
+  it("ne marque pas répondu ce qui n'a pas été publié", () => {
+    // LE défaut corrigé : la réponse était marquée publiée même quand la
+    // plateforme n'était pas connectée et que rien n'était parti. Le gérant
+    // croyait avoir répondu publiquement ; son client ne voyait rien, et le
+    // taux de réponse — un indicateur vendu — comptait des réponses
+    // inexistantes.
+    expect(nextStatus('draft_ready', 'publish', 'pending')).toBe('reply_pending');
+    expect(nextStatus('draft_ready', 'publish', 'failed')).toBe('reply_failed');
+  });
+
+  it('suppose la prudence en l’absence de précision', () => {
+    // Un appelant qui oublie l'issue ne doit pas obtenir « publié » par
+    // défaut : le défaut par défaut doit être celui qui ne ment pas.
+    expect(nextStatus('draft_ready', 'publish')).toBe('reply_pending');
+  });
+
+  it('ne compte comme publié que ce qui est confirmé', () => {
+    expect(isPublished({ status: 'answered' })).toBe(true);
+    expect(isPublished({ status: 'reply_pending' })).toBe(false);
+    expect(isPublished({ status: 'reply_failed' })).toBe(false);
   });
 });

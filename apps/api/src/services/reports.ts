@@ -8,10 +8,11 @@
  */
 
 import {
+  resolveEntitlements,
+  hasEntitlement,
   PLATFORM_LABELS,
   buildHighlights,
   computeMetrics,
-  hasFeature,
   previousMonthPeriod,
   ratingTrend,
   renderReportHtml,
@@ -127,7 +128,11 @@ export function createReportService({ repo, notifier, logger }: Deps) {
       const result = { sent: 0, skipped: 0, errors: [] as string[] };
 
       for (const establishment of establishments) {
-        if (!hasFeature(establishment.plan, establishment.addons, 'analytics_advanced')) {
+        const droits = resolveEntitlements(
+          await repo.subscriptions.findByEstablishment(establishment.id),
+          establishment,
+        );
+        if (!hasEntitlement(droits, 'analytics_advanced')) {
           result.skipped += 1;
           continue;
         }

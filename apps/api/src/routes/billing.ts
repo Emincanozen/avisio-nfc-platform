@@ -6,11 +6,11 @@
  */
 
 import {
+  hasEntitlement,
   DEFAULT_PREFERENCES,
   commitmentEndsAt,
   formatEuros,
   generateId,
-  hasFeature,
   latePenaltyCents,
   monthlyCents,
   previousMonthPeriod,
@@ -115,10 +115,12 @@ export async function registerBillingRoutes(app: FastifyInstance): Promise<void>
 
     const establishment = await repo.establishments.findById(id);
     if (!establishment) throw httpError(404, 'Établissement introuvable.');
-    if (!hasFeature(establishment.plan, establishment.addons, 'analytics_advanced')) {
+    const droits = await app.ctx.entitlements.forEstablishment(establishment);
+    if (!hasEntitlement(droits, 'analytics_advanced')) {
       throw httpError(
         402,
-        "Le rapport mensuel est compris dans l'offre Premium ou l'add-on Analytics.",
+        droits.restriction ||
+          "Le rapport mensuel est compris dans l'offre Premium ou l'add-on Analytics.",
       );
     }
 
@@ -132,8 +134,9 @@ export async function registerBillingRoutes(app: FastifyInstance): Promise<void>
 
     const establishment = await repo.establishments.findById(id);
     if (!establishment) throw httpError(404, 'Établissement introuvable.');
-    if (!hasFeature(establishment.plan, establishment.addons, 'analytics_advanced')) {
-      throw httpError(402, "Le rapport mensuel est compris dans l'offre Premium.");
+    const droits = await app.ctx.entitlements.forEstablishment(establishment);
+    if (!hasEntitlement(droits, 'analytics_advanced')) {
+      throw httpError(402, droits.restriction || "Le rapport mensuel est compris dans l'offre Premium.");
     }
 
     const report = await reports.build(id, parsePeriod(period));
@@ -194,8 +197,32 @@ export async function registerBillingRoutes(app: FastifyInstance): Promise<void>
       })
       .parse(request.body);
 
+    /**
+     * Un point de terminaison ne change jamais de propriétaire.
+     *
+     * `subscribe` écrasait le `managerId` d'un enregistrement existant. Un
+     * gérant qui connaissait le point de terminaison d'un autre se
+     * l'appropriait donc en une requête — et l'autre cessait de recevoir ses
+     * alertes sans rien remarquer, ce qui est exactement ce que le produit
+     * vend.
+     *
+     * Réenregistrer le sien reste normal : un navigateur régénère ses clés.
+     */
+    const existant = await repo.push.findByEndpoint(body.endpoint);
+    if (existant && existant.managerId !== request.managerId) {
+      request.log.warn(
+        `Tentative de réattribution d'un abonnement push : ${request.managerId} sur un point de terminaison de ${existant.managerId}`,
+      );
+      throw Object.assign(
+        new Error("Ce point de terminaison est déjà rattaché à un autre compte."),
+        { statusCode: 409, code: 'endpoint_pris' },
+      );
+    }
+
     const record = await repo.push.subscribe({
-      id: generateId('psub'),
+      // Réenregistrement du même appareil : on conserve l'identifiant
+      // existant plutôt que d'en créer un second pour la même ligne.
+      id: existant?.id ?? generateId('psub'),
       managerId: request.managerId,
       endpoint: body.endpoint,
       p256dh: body.keys.p256dh,

@@ -214,7 +214,24 @@ if (target) {
     token: ownerToken,
     body: { text: suggestion.body?.text ?? 'Merci de votre retour, nous en tenons compte.' },
   });
-  check('réponse publiée', published.status === 200 && published.body?.review?.status === 'answered');
+  // Sans connecteur en direct, la réponse est enregistrée mais NON publiée :
+  // c'est la vérité, et le statut doit la dire. La marquer « answered »
+  // ferait compter une réponse inexistante dans le taux de réponse vendu.
+  check(
+    'réponse enregistrée avec un statut honnête',
+    published.status === 200 &&
+      ['answered', 'reply_pending', 'reply_failed'].includes(published.body?.review?.status),
+    `statut reçu : ${published.body?.review?.status}`,
+  );
+  check(
+    'texte du gérant conservé quoi qu’il arrive',
+    Boolean(published.body?.review?.replyText),
+  );
+  check(
+    'publication annoncée seulement si la plateforme a confirmé',
+    published.body?.published === (published.body?.review?.status === 'answered'),
+    `published=${published.body?.published}, statut=${published.body?.review?.status}`,
+  );
 } else {
   check('un avis négatif non traité existe', false, 'aucun avis à traiter trouvé');
 }

@@ -224,6 +224,16 @@ export interface Repository {
 
   push: {
     subscribe(record: PushSubscriptionRecord): Promise<PushSubscriptionRecord>;
+    /**
+     * Abonnement rattaché à ce point de terminaison, quel qu'en soit le
+     * propriétaire.
+     *
+     * Nécessaire pour refuser une réattribution : `subscribe` écrasait le
+     * `managerId` d'un enregistrement existant, si bien qu'un gérant
+     * connaissant le point de terminaison d'un autre se l'appropriait — et
+     * l'autre cessait de recevoir ses alertes sans rien remarquer.
+     */
+    findByEndpoint(endpoint: string): Promise<PushSubscriptionRecord | null>;
     listByManager(managerId: string): Promise<PushSubscriptionRecord[]>;
     unsubscribe(endpoint: string): Promise<void>;
     queue(record: PendingPushRecord): Promise<PendingPushRecord>;

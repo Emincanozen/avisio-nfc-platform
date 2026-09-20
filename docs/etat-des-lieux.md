@@ -51,8 +51,8 @@ C'est le seul blocage, et il est administratif, pas technique.
 |---|---|
 | **Ce qui est écrit** | Le connecteur Google Business Profile complet : rafraîchissement du jeton OAuth, pagination, arrêt sur le dernier avis connu, lecture des compteurs, publication des réponses. |
 | **Ce qui manque** | L'autorisation d'accès à l'API, à demander à Google. Délai annoncé : 4 à 8 semaines. |
-| **Ce qui tourne en attendant** | Un connecteur simulé, même interface et mêmes cadences, qui produit des avis avec une distribution de notes réaliste. |
-| **Comment le savoir** | `GET /health` et le journal de démarrage annoncent `Google: simulé` ou `Google: connecté`. |
+| **Ce qui tourne en attendant** | **Rien.** Depuis le 20 septembre 2026, une plateforme non connectée est muette. Le connecteur simulé ne tourne plus que sous `AVISIO_DEMO_MODE=true`, hors production, et ses avis portent `source: 'demo'` — exclus de toute métrique. |
+| **Comment le savoir** | `GET /health` et le journal de démarrage annoncent `Google: connecté` ou `Google: non connecté`, et `données réelles` ou `MODE DÉMONSTRATION`. |
 
 Le jour où l'accès est accordé, il suffit de renseigner trois variables
 (`GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_REFRESH_TOKEN`) et de
@@ -131,7 +131,7 @@ du service de push simulé est auto-signé. **À ne jamais utiliser en productio
 
 | Fonctionnalité | Ce qui manque | Conséquence aujourd'hui |
 |---|---|---|
-| **Lecture des avis Google** | Autorisation API Google Business Profile | **Les vrais avis n'entrent pas.** Avis simulés à la place |
+| **Lecture des avis Google** | Autorisation API Google Business Profile | **Les vrais avis n'entrent pas.** Plus rien n'est fabriqué à la place : la plateforme est muette et l'interface le dit |
 | Lecture TripAdvisor / Facebook / Yelp | Accès partenaires | Compteurs non synchronisés, routage par rotation de scans |
 | Envoi des e-mails | Clé Resend | Les e-mails sont écrits dans le journal, avec leur contenu |
 | Réception push sur un vrai téléphone | Domaine HTTPS + appareil réel | Vérifié en local seulement |

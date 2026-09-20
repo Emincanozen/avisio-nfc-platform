@@ -61,11 +61,11 @@ l'argumentaire commercial.
 
 | Indicateur | Valeur | Commande |
 |---|---|---|
-| Tests | 323, tous verts | `npm test` |
+| Tests | 377, tous verts | `npm test` |
 | Typecheck | passe, `src` + `test` + `scripts` | `npm run typecheck` |
 | Build de production | passe | `npm run build` |
-| Bout en bout sur PostgreSQL | 54 / 54 | `node scripts/smoke-test.mjs` |
-| Adaptateur Prisma | 18 / 18 | `npx tsx scripts/pg-verify.mts` |
+| Bout en bout sur PostgreSQL | 56 / 56 | `node scripts/smoke-test.mjs` |
+| Adaptateur Prisma | 23 / 23 | `npx tsx scripts/pg-verify.mts` |
 | Chaîne de notification | complète | `node scripts/push-selftest.mjs` |
 | Secrets dans le dépôt | aucun | `bash scripts/check-secrets.sh` |
 
@@ -279,7 +279,111 @@ fausse l'analyse de sentiment.
 
 ---
 
+### D14 — Les droits viennent de l'abonnement, jamais de l'établissement
+
+`packages/core/src/entitlements.ts`. `resolveEntitlements(subscription,
+establishment)` puis `hasEntitlement(state, feature)`.
+
+*Pourquoi* : `establishment.plan` et `subscription.plan` étaient deux copies
+de la même vérité, lues par deux parties du système qui ne se parlaient pas.
+Les droits lisaient la première, la facturation la seconde — et une route
+laissait le gérant modifier la première. Premium gratuit, sans erreur ni
+journal.
+
+*Pourquoi pas seulement fermer la route* : la structure serait restée, et la
+prochaine route étourdie aurait rouvert la faille. Vingt appelants lisaient la
+donnée modifiable ; en corriger un sur vingt n'aurait rien réglé.
+
+*Conséquence* : `hasFeature` ne sert plus qu'à décrire le catalogue. **Il ne
+doit plus autoriser quoi que ce soit.** Un désaccord entre les deux est
+signalé dans le back-office (`entitlementDrift`).
+
+### D15 — Rien n'est fabriqué hors mode démonstration
+
+*Pourquoi* : sans accès Google, le connecteur simulé tournait quand même, y
+compris sur PostgreSQL de production. Faux avis, fausses alertes, fausses
+statistiques — le client voyait un tableau de bord rempli d'avis inexistants.
+
+*Ce qui remplace* : un connecteur **inactif** qui ne renvoie rien et dont
+`live` est faux. Une plateforme non connectée est muette : c'est la vérité.
+
+*Écarté* : garder le simulateur en marquant simplement les avis. Le marquage
+seul n'empêche pas la contamination — il la rend traçable après coup.
+
+*Trois barrières indépendantes* : `AVISIO_DEMO_MODE`, le refus de démarrage en
+production, et `capabilities.demoMode` qui exige aussi `NODE_ENV !==
+'production'`.
+
+### D16 — `answered` signifie publié et confirmé, rien de moins
+
+*Pourquoi* : un avis passait en `answered` dès validation du texte, même sans
+plateforme connectée. Le gérant croyait avoir répondu publiquement, son client
+ne voyait rien, et le taux de réponse vendu comptait des réponses
+inexistantes.
+
+*Cinq états* : `new`, `draft_ready`, `reply_pending`, `answered`,
+`reply_failed`. Le texte est conservé dans tous les cas — le perdre parce que
+Google est injoignable punirait le gérant d'une panne qui n'est pas la sienne.
+
+*Défaut par défaut* : `nextStatus(..., 'publish')` sans issue précisée renvoie
+`reply_pending`. Un appelant étourdi obtient le statut prudent, pas le flatteur.
+
 ## 4. Travail effectué
+
+### Session du 20 septembre 2026 (2) — défauts P1 : sécurité, droits, intégrité
+
+Quatre défauts de priorité 1, signalés par un audit externe, **vérifiés dans
+le code avant correction** — ils étaient tous réels.
+
+**1. `PATCH /establishments/:id` acceptait `plan` et `addons`.** Faille
+d'intégrité commerciale exploitable depuis un compte gérant ordinaire :
+Premium gratuit, sans erreur ni journal. Corrigé en profondeur, voir **D14**.
+
+**2. `POST /push/subscribe` réattribuait un point de terminaison.** Un gérant
+connaissant celui d'un autre se l'appropriait ; l'autre cessait de recevoir
+ses alertes sans rien remarquer. `findByEndpoint` ajouté au port et aux deux
+adaptateurs, refus en 409.
+
+**3. Aucune validation au démarrage en production.** Voir
+`packages/core/src/config-guard.ts` et `docs/securite.md` §2 quater. Sortie 78,
+refus net, causes cumulées. Vérifié en exécutant réellement le serveur
+compilé : refus sans configuration, démarrage avec.
+
+**4. Les connecteurs simulés contaminaient les bases réelles.** Le défaut le
+plus insidieux du lot. Voir **D15**.
+
+**Défaut découvert en corrigeant le 4** : sans connecteur, la publication de
+réponse échouait en 502. Le comportement d'origine — marquer `answered` sans
+rien publier — était pire. Voir **D16**.
+
+**Vérifié** : 377 tests (33 ajoutés), typecheck 0 erreur, build propre,
+23/23 sur l'adaptateur Prisma contre PostgreSQL 16 réel (dont les nouvelles
+méthodes push), 56/56 de bout en bout avec l'**API compilée**. Chaque
+correctif a un test qui **échoue sans lui**, vérifié en réintroduisant le
+défaut.
+
+**Non fait, et c'est délibéré** : les priorités 2 à 5 de l'audit
+(idempotence de la facturation, prorata persisté, identifiants Google,
+curseur de synchronisation, fidélité, caisse, outbox, plafond IA concurrent,
+RGPD, migrations versionnées). Le mandat était de traiter P1 d'abord. Rien
+n'a été poussé sur GitHub, aucun déploiement, aucun secret modifié.
+
+**Le test intermittent est élucidé.** Il avait résisté à 14 exécutions
+propres ; il a fini par tomber. Les cas de `describe('connexion')` traversent
+le vrai chemin d'authentification : jusqu'à quinze dérivations scrypt par
+cas, ~2,4 s de calcul pur contre les 5 s par défaut de Vitest. Une marge de
+2× sur un poste à seize cœurs, donc aucune marge sur un exécuteur GitHub à
+deux cœurs. Délai porté à 30 s **sur le bloc, sans toucher à une assertion** ;
+vérifié que Vitest lit bien l'option (un cas de 400 ms sous un délai de 50 ms
+échoue). Mon hypothèse précédente avait été jugée « réfutée » à tort : un cas
+tué à 5 000 ms n'enregistre jamais la durée qui l'aurait confirmée.
+
+**Trouvé en instruisant ce test, non corrigé** : `verifyPassword` utilise
+`scryptSync`, qui bloque la boucle d'événements ~117 ms par appel. Dix
+tentatives simultanées figent toute l'API 1,2 s, sans qu'aucun compte valide
+soit nécessaire, et le limiteur de débit n'y peut rien puisqu'il tourne sur
+la boucle bloquée. Mesuré, chiffres dans `docs/securite.md` §9. Hors
+périmètre du mandat en cours : signalé, pas corrigé en douce.
 
 ### Session du 20 septembre 2026 — réparation de l'intégration continue
 
@@ -413,15 +517,23 @@ verrouillait le compte dont il avait besoin. Voir D12.
 7. `npm audit` dans l'intégration continue.
 8. Opérateur SMS pour les invitations de caisse.
 9. Mesure de montée en charge.
+10. **`scrypt` asynchrone à la place de `scryptSync`.** Mesuré le
+    21 septembre 2026 : la boucle d'événements est bloquée ~117 ms par
+    vérification, donc 1,2 s pour dix tentatives simultanées, l'API entière
+    figée. Correctif connu et court, mais il touche le chemin
+    d'authentification : à faire avec ses propres tests, pas en passant.
+    Détail et mesures dans `docs/securite.md` §9.
 
 ### Prochaine action concrète
 
-**Créer le dépôt GitHub privé et y pousser.** Le travail local est complet et
-committé ; aucun outil `gh` ni identifiant n'est disponible dans
-l'environnement de travail, la création revient donc à @OZEN.
+**P2.5 — double facturation sous concurrence.** Le dépôt privé existe, les
+défauts P1 sont corrigés et poussés. Le suivant par criticité est
+l'idempotence de la facturation : à reproduire avant de corriger, puis à
+tenir par des contraintes en base, pas seulement par du code applicatif.
 
-Puis, dans l'ordre : demande d'accès Google (priorité 1.1, délai long),
-déploiement (1.2), encaissement (2.3).
+Puis, dans l'ordre : prorata persisté (P2.6), modèle de période (P2.7),
+mentions légales des factures (P2.9). En parallèle et indépendant du code :
+demande d'accès Google (priorité 1.1, délai long), déploiement (1.2).
 
 ---
 

@@ -147,7 +147,8 @@ mode dégradé explicite plutôt que de faire échouer le démarrage — voir
 |---|---|
 | `DATABASE_URL` | Données en mémoire + jeu de démonstration |
 | `ANTHROPIC_API_KEY` | Analyse et réponses par le moteur heuristique local |
-| `GOOGLE_CLIENT_ID` / `GOOGLE_REFRESH_TOKEN` | Connecteur Google simulé |
+| `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | Google **non connecté** : aucun avis n’entre, rien n’est fabriqué |
+| `AVISIO_DEMO_MODE` | Vide : aucune donnée fabriquée. À `true` (hors production) : connecteurs simulés, avis marqués `demo` et exclus des métriques |
 | `RESEND_API_KEY` | E-mails journalisés en console |
 | `VAPID_PUBLIC_KEY` / `VAPID_PRIVATE_KEY` | Push journalisés en console |
 
@@ -236,7 +237,9 @@ Par honnêteté, et par ordre de priorité :
    établissement est écrit ; l'accès reste à demander. Un projet non approuvé
    a un quota de **0 requête par minute** : tous les appels échouent, ce n'est
    pas un défaut d'implémentation. D'ici là, l'import manuel alimente le
-   produit avec de vrais avis, et le connecteur simulé sert la démonstration.
+   produit avec de vrais avis. Les connecteurs simulés ne tournent plus que
+   sous `AVISIO_DEMO_MODE=true`, hors production : sans ce réglage, une
+   plateforme non connectée reste **muette** au lieu de fabriquer des avis.
    Procédure : [`docs/google.md`](docs/google.md).
 3. **Accès partenaires TripAdvisor / Facebook / Yelp.** Même situation.
 4. **Envoi de SMS.** Les invitations de caisse par SMS sont journalisées : il

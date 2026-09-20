@@ -7,13 +7,15 @@
  */
 
 import {
+  PLATFORM_LABELS,
+  REVIEW_STATUS_LABELS,
+  hasEntitlement,
   NotEnoughPeersError,
   assertCompliant,
   checkLandingConfig,
   fitsOnNtag213,
   generateId,
   generateSlug,
-  hasFeature,
   nextStatus,
   platformQuota,
   replyWarnings,
@@ -51,19 +53,27 @@ export async function registerManagerRoutes(app: FastifyInstance): Promise<void>
       repo.tags.listByEstablishment(id),
     ]);
 
+    // Les droits viennent de l'abonnement facturé, jamais de l'établissement :
+    // ce dernier est modifiable par le gérant, le premier ne l'est que par
+    // l'exploitant. Voir packages/core/src/entitlements.ts.
+    const droits = await app.ctx.entitlements.forEstablishment(establishment);
+
     return {
       establishment,
       platformLinks: links,
       tags: tags.map((tag) => ({ ...tag, url: tagUrl(env.webUrl, tag.slug) })),
-      quota: platformQuota(establishment.plan, establishment.addons),
+      quota: platformQuota(droits.plan, droits.addons),
+      /** Statut de l'abonnement, pour que l'interface explique une restriction. */
+      subscriptionStatus: droits.status,
+      restriction: droits.restriction,
       features: {
-        negativeAlerts: hasFeature(establishment.plan, establishment.addons, 'negative_alerts'),
-        aiReplies: hasFeature(establishment.plan, establishment.addons, 'ai_reply_suggestions'),
-        analytics: hasFeature(establishment.plan, establishment.addons, 'analytics_basic'),
-        nlpThemes: hasFeature(establishment.plan, establishment.addons, 'nlp_themes'),
-        benchmark: hasFeature(establishment.plan, establishment.addons, 'competitive_benchmark'),
-        loyalty: hasFeature(establishment.plan, establishment.addons, 'loyalty'),
-        multiPlatform: hasFeature(establishment.plan, establishment.addons, 'multi_platform'),
+        negativeAlerts: hasEntitlement(droits, 'negative_alerts'),
+        aiReplies: hasEntitlement(droits, 'ai_reply_suggestions'),
+        analytics: hasEntitlement(droits, 'analytics_basic'),
+        nlpThemes: hasEntitlement(droits, 'nlp_themes'),
+        benchmark: hasEntitlement(droits, 'competitive_benchmark'),
+        loyalty: hasEntitlement(droits, 'loyalty'),
+        multiPlatform: hasEntitlement(droits, 'multi_platform'),
       },
     };
   });
@@ -71,18 +81,32 @@ export async function registerManagerRoutes(app: FastifyInstance): Promise<void>
   app.patch('/establishments/:id', protectedRoute, async (request) => {
     const { id } = idParam.parse(request.params);
     assertAccess(request, id);
+    /**
+     * Informations opérationnelles uniquement.
+     *
+     * `plan` et `addons` ont été retirés, et c'est une correction de sécurité,
+     * pas un resserrement de confort. Les droits lisaient l'établissement
+     * pendant que la facturation lisait l'abonnement : une seule requête sur
+     * cette route suffisait à passer en Premium en restant facturé Essentiel.
+     * Aucune erreur, aucun journal — juste le produit gratuitement.
+     *
+     * Les conditions commerciales passent désormais exclusivement par
+     * `PATCH /admin/subscriptions/:id`, qui met à jour l'abonnement ET
+     * l'établissement, et calcule le prorata.
+     *
+     * `strict()` refuse tout champ inconnu plutôt que de l'ignorer en
+     * silence : un client qui envoie `plan` doit l'apprendre, pas croire que
+     * sa demande a été prise en compte.
+     */
     const patch = z
       .object({
         name: z.string().min(2).max(120).optional(),
         brandTone: z.string().min(5).max(400).optional(),
         defaultLocale: z.enum(['fr', 'en', 'es', 'de', 'it', 'nl']).optional(),
-        plan: z.enum(['essentiel', 'pro', 'premium']).optional(),
-        addons: z
-          .array(z.enum(['negative_reviews', 'extra_platform', 'analytics', 'loyalty']))
-          .optional(),
         postalCode: z.string().regex(/^\d{5}$/).optional(),
         nafCode: z.string().max(10).optional(),
       })
+      .strict()
       .parse(request.body);
 
     return repo.establishments.update(id, patch);
@@ -123,7 +147,8 @@ export async function registerManagerRoutes(app: FastifyInstance): Promise<void>
     assertAccess(request, id);
     const establishment = await repo.establishments.findById(id);
     if (!establishment) throw httpError(404, 'Établissement introuvable.');
-    if (!hasFeature(establishment.plan, establishment.addons, 'competitive_benchmark')) {
+    const droits = await app.ctx.entitlements.forEstablishment(establishment);
+    if (!hasEntitlement(droits, 'competitive_benchmark')) {
       throw httpError(402, "Le benchmark est inclus dans l'offre Premium ou l'add-on Analytics.");
     }
     try {
@@ -143,7 +168,9 @@ export async function registerManagerRoutes(app: FastifyInstance): Promise<void>
     assertAccess(request, id);
     const query = z
       .object({
-        status: z.enum(['new', 'draft_ready', 'answered', 'ignored']).optional(),
+        status: z
+          .enum(['new', 'draft_ready', 'reply_pending', 'answered', 'reply_failed', 'ignored'])
+          .optional(),
         maxRating: z.coerce.number().int().min(1).max(5).optional(),
         days: z.coerce.number().int().min(1).max(365).optional(),
         limit: z.coerce.number().int().min(1).max(200).default(50),
@@ -171,7 +198,8 @@ export async function registerManagerRoutes(app: FastifyInstance): Promise<void>
 
     const establishment = await repo.establishments.findById(review.establishmentId);
     if (!establishment) throw httpError(404, 'Établissement introuvable.');
-    if (!hasFeature(establishment.plan, establishment.addons, 'ai_reply_suggestions')) {
+    const droits = await app.ctx.entitlements.forEstablishment(establishment);
+    if (!hasEntitlement(droits, 'ai_reply_suggestions')) {
       throw httpError(402, "Les suggestions de réponse sont incluses à partir de l'offre Pro.");
     }
 
@@ -204,30 +232,61 @@ export async function registerManagerRoutes(app: FastifyInstance): Promise<void>
     const link = links.find((l) => l.platform === review.platform);
     const connector = connectors.get(review.platform);
 
-    let published = false;
-    if (connector && link) {
+    /**
+     * Le statut dit ce qui s'est réellement passé, jamais ce qu'on espérait.
+     *
+     * Avant, la réponse était marquée `answered` dans tous les cas — y compris
+     * quand la plateforme n'était pas connectée et que rien n'était parti. Le
+     * gérant croyait avoir répondu publiquement, son client ne voyait jamais
+     * la réponse, et le taux de réponse affiché — un indicateur vendu —
+     * comptait des réponses inexistantes.
+     *
+     * Trois issues, trois statuts :
+     *  - la plateforme confirme        → `answered`
+     *  - pas de connecteur en direct   → `reply_pending`, texte conservé
+     *  - la plateforme refuse          → `reply_failed`, et on le dit
+     *
+     * Aucune ne lève d'erreur : le texte du gérant est toujours enregistré.
+     * Le perdre parce que Google est injoignable serait le punir d'une panne
+     * qui n'est pas la sienne.
+     */
+    let outcome: 'confirmed' | 'pending' | 'failed' = 'pending';
+    let detail = '';
+
+    if (connector?.live && link) {
       try {
         await connector.publishReply(
           { establishmentId: review.establishmentId, externalId: link.externalId ?? null },
           review.externalId,
           text,
         );
-        published = connector.live;
+        outcome = 'confirmed';
       } catch (error) {
-        throw httpError(
-          502,
-          `Publication refusée par ${review.platform} : ${(error as Error).message}`,
+        outcome = 'failed';
+        detail = (error as Error).message;
+        request.log.warn(
+          `Publication refusée par ${review.platform} pour l'avis ${review.id} : ${detail}`,
         );
       }
+    } else {
+      detail = `${PLATFORM_LABELS[review.platform]} n'est pas connectée : la réponse est enregistrée mais n'est pas publiée.`;
     }
 
     const updated = await repo.reviews.update(review.id, {
       replyText: text,
       repliedAt: new Date().toISOString(),
-      status: nextStatus(review.status, 'publish'),
+      status: nextStatus(review.status, 'publish', outcome),
     });
 
-    return { review: updated, published, warnings: replyWarnings(text) };
+    return {
+      review: updated,
+      /** Vrai uniquement si la plateforme a confirmé. */
+      published: outcome === 'confirmed',
+      outcome,
+      statusLabel: REVIEW_STATUS_LABELS[updated.status],
+      ...(detail ? { detail } : {}),
+      warnings: replyWarnings(text),
+    };
   });
 
   app.post('/reviews/:id/ignore', protectedRoute, async (request) => {

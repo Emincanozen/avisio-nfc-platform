@@ -7,8 +7,8 @@
  */
 
 import {
+  hasEntitlement,
   generateId,
-  hasFeature,
   landingDisclosure,
   messages,
   negotiateLocale,
@@ -99,7 +99,8 @@ export async function registerPublicRoutes(app: FastifyInstance): Promise<void> 
 
     const links = await repo.platformLinks.listByEstablishment(establishment.id);
     const quota = platformQuota(establishment.plan, establishment.addons);
-    const loyaltyEnabled = hasFeature(establishment.plan, establishment.addons, 'loyalty');
+    const droits = await app.ctx.entitlements.forEstablishment(establishment);
+    const loyaltyEnabled = hasEntitlement(droits, 'loyalty');
 
     const base = {
       tag: { slug: tag.slug, label: tag.label },
@@ -204,7 +205,8 @@ export async function registerPublicRoutes(app: FastifyInstance): Promise<void> 
     const establishment = await repo.establishments.findById(tag.establishmentId);
     if (!establishment) throw httpError(404, 'Établissement introuvable.');
 
-    if (!hasFeature(establishment.plan, establishment.addons, 'loyalty')) {
+    const droits = await app.ctx.entitlements.forEstablishment(establishment);
+    if (!hasEntitlement(droits, 'loyalty')) {
       throw httpError(403, "Le module fidélité n'est pas actif sur cet établissement.");
     }
 

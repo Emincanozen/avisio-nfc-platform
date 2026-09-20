@@ -12,9 +12,10 @@
 
 import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 import {
+  resolveEntitlements,
+  hasEntitlement,
   decideInvitation,
   generateId,
-  hasFeature,
   invitationMessage,
   posStats,
   tagUrl,
@@ -108,7 +109,11 @@ export function createPosService({ repo, logger, sendInvitation }: Deps) {
       ticket: PosTicket,
       now = new Date().toISOString(),
     ): Promise<{ recorded: boolean; invited: boolean; reason: string; receiptUrl: string | null }> {
-      const entitled = hasFeature(establishment.plan, establishment.addons, 'pos_integration');
+      const droits = resolveEntitlements(
+        await repo.subscriptions.findByEstablishment(establishment.id),
+        establishment,
+      );
+      const entitled = hasEntitlement(droits, 'pos_integration');
 
       const existing = await repo.pos.findTicket(establishment.id, ticket.externalId);
       const contactHash = ticket.contact

@@ -49,7 +49,12 @@ enum Sector {
 enum ReviewStatus {
   new
   draft_ready
+  // Valide par le gerant, publication NON confirmee par la plateforme.
+  reply_pending
+  // Publie ET confirme. Rien d autre ne merite ce statut.
   answered
+  // La plateforme a refuse la publication.
+  reply_failed
   ignored
 }
 

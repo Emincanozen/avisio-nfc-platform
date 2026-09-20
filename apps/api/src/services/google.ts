@@ -24,6 +24,8 @@ export interface ExternalReview {
   comment: string;
   publishedAt: string;
   replyText?: string;
+  /** Vrai pour un avis fabrique par le connecteur simule. */
+  demo?: boolean;
 }
 
 export interface PlatformCounters {
@@ -238,6 +240,10 @@ export function createSimulatedConnector(platform: PlatformId): ReviewConnector 
           rating,
           comment,
           publishedAt: new Date().toISOString(),
+          // Marque portee jusqu'en base : un avis fabrique ne doit jamais
+          // pouvoir etre confondu avec un avis reel, ni entrer dans une
+          // metrique vendue au client.
+          demo: true,
         } satisfies ExternalReview;
       });
     },
@@ -277,7 +283,35 @@ export function toDomainReview(
     comment: external.comment,
     publishedAt: external.publishedAt,
     ingestedAt: new Date().toISOString(),
+    source: external.demo ? 'demo' : 'sync',
     status: external.replyText ? 'answered' : 'new',
     ...(external.replyText ? { replyText: external.replyText, repliedAt: external.publishedAt } : {}),
+  };
+}
+
+/**
+ * Connecteur inactif.
+ *
+ * Ce que fait une plateforme non connectée hors mode démonstration : rien.
+ * Pas d'erreur, pas d'avis, pas de compteur. `live` est faux, et l'interface
+ * s'en sert pour afficher « source non connectée » plutôt que de laisser
+ * croire à une surveillance qui n'existe pas.
+ *
+ * Il remplace le connecteur simulé, qui tournait partout par défaut et
+ * écrivait de faux avis dans les bases réelles.
+ */
+export function createInactiveConnector(platform: PlatformId): ReviewConnector {
+  return {
+    platform,
+    live: false,
+    async fetchReviews() {
+      return [];
+    },
+    async fetchCounters() {
+      return null;
+    },
+    async publishReply() {
+      throw new NotConnectedError(`plateforme ${platform} non connectée`);
+    },
   };
 }

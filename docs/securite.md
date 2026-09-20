@@ -39,17 +39,102 @@ jamais une preuve d'autorisation.
 Un compte `admin` traverse la garde. C'est délibéré, et c'est le propre du
 back-office.
 
-### Trois failles trouvées, toutes corrigées
+### Cinq failles trouvées, toutes corrigées
 
 | Faille | Portée | Corrigée |
 |---|---|---|
+| **`PATCH /establishments/:id` acceptait `plan` et `addons`** | **Intégrité commerciale.** Les droits lisaient `establishment.plan`, la facturation lisait `subscription.plan`. Une requête suffisait à passer en Premium en restant facturé Essentiel — sans erreur, sans journal | Champs retirés, schéma `strict()`. Et surtout §2 bis : les droits viennent de l'abonnement |
+| **`POST /push/subscribe` réattribuait un point de terminaison** | Un gérant connaissant celui d'un autre se l'appropriait en une requête ; l'autre cessait de recevoir ses alertes sans rien remarquer | `findByEndpoint` puis refus en 409 si le propriétaire diffère. Réenregistrer le sien reste normal |
 | `/ops/ingest` ouvert à tout gérant | Déclenchait l'ingestion de **tout le parc** : un client provoquait les appels d'API tierces et les dépenses de modèle de langage de tous les autres | Routes supprimées, seules subsistent `/admin/ops/*` |
 | `/alerts/:id/read` sans contrôle | L'identifiant suffisait à marquer lue l'alerte d'un concurrent | Lecture puis `assertAccess` |
 | `/push/unsubscribe` sans contrôle | Couper les notifications d'un autre gérant, donc l'aveugler sur ses avis négatifs | Restreint aux abonnements du compte |
 
-Chacune a son test de non-régression. La dernière répond volontairement de la
-même façon dans les deux cas : sinon la route deviendrait un oracle
-d'existence.
+Chacune a son test de non-régression, et chacun de ces tests **échoue sans son
+correctif** — vérifié en réintroduisant la faille. `/push/unsubscribe` répond
+volontairement de la même façon dans les deux cas : sinon la route deviendrait
+un oracle d'existence.
+
+## 2 bis. Les droits suivent la facture
+
+`packages/core/src/entitlements.ts`. Une seule fonction répond à « ce client
+a-t-il droit à ceci ? », et elle lit **l'abonnement**.
+
+`establishment.plan` et `subscription.plan` étaient deux copies de la même
+vérité, lues par deux parties du système qui ne se parlaient pas. Corriger la
+seule route qui permettait de les faire diverger aurait laissé la structure
+intacte — et la prochaine route étourdie aurait rouvert la faille.
+
+| Situation | Droits accordés |
+|---|---|
+| Abonnement `active` ou `trialing` | Ceux de l'abonnement |
+| Abonnement `past_due` | Ceux de l'abonnement. C'est le **délai de grâce** : couper au premier jour de retard ferait fuir un client qui a changé de carte, et les relances existent pour occuper ce temps |
+| Abonnement `suspended` ou `canceled` | **Fonctions facturées coupées.** Consultation et factures restent ouvertes : retirer ses factures à un client suspendu pour impayé lui ôterait le document dont il a besoin pour payer |
+| Aucun abonnement | Ceux de l'établissement. Cas nommé explicitement — il n'y a rien d'autre à lire |
+
+Un désaccord entre l'abonnement et l'établissement — écriture partielle,
+changement d'offre interrompu — est **signalé dans le back-office**
+(`entitlementDrift`), plutôt que découvert six mois plus tard en comparant une
+facture à un usage.
+
+`hasFeature` existe toujours, mais ne sert plus qu'à décrire le catalogue
+(« que contient Premium ? »). **Il ne doit plus autoriser quoi que ce soit.**
+
+## 2 ter. Les données fabriquées ne peuvent plus contaminer une base réelle
+
+C'était le défaut le plus insidieux du produit, et il ne ressemblait pas à une
+faille. Sans accès Google — c'est-à-dire dans l'état actuel — le connecteur
+**simulé** tournait quand même, y compris sur une base PostgreSQL de
+production. Il y écrivait de faux avis, de fausses alertes, de fausses
+statistiques. Le client voyait son tableau de bord se remplir d'avis qui
+n'existaient pas, et la note moyenne qu'on lui facturait était inventée.
+
+Trois barrières, indépendantes :
+
+1. **Les simulateurs n'existent que sous `AVISIO_DEMO_MODE=true`.** Partout
+   ailleurs, une plateforme non connectée utilise un connecteur *inactif* :
+   il ne renvoie rien, et `live` est faux, ce dont l'interface se sert pour
+   afficher « source non connectée ».
+2. **Le contrôle de configuration refuse le démarrage** si `AVISIO_DEMO_MODE`
+   est actif avec `NODE_ENV=production`.
+3. **`capabilities.demoMode` exige aussi `NODE_ENV !== 'production'`**, ce qui
+   ferme le contournement d'une instance lancée hors du chemin normal — un
+   script, un binaire exécuté à la main.
+
+Tout avis produit par un simulateur porte `source: 'demo'` **jusqu'en base**,
+et `computeMetrics` l'écarte d'entrée. Le filtrage est dans le calcul, pas
+chez chaque appelant : aucun n'oubliera.
+
+## 2 quater. Aucun serveur de production ne démarre mal configuré
+
+`packages/core/src/config-guard.ts`, appelé avant toute connexion. Sortie
+`78` (EX_CONFIG) et refus net.
+
+| Refusé en production | Ce que produisait le démarrage silencieux |
+|---|---|
+| `DATABASE_URL` absente | Adaptateur mémoire : jeu de démonstration, identifiants publiés dans ce dépôt, perte totale au redémarrage |
+| `JWT_SECRET` absent, égal au secret de `.env.example`, ou < 32 caractères | Quiconque a lu le dépôt forge un jeton valide, rôle administrateur compris |
+| `SECRETS_KEY` identique à `JWT_SECRET` | Faire tourner le secret des sessions rendrait illisibles tous les jetons Google des clients |
+| `PUBLIC_WEB_URL` / `PUBLIC_API_URL` non HTTPS | Le push web l'exige ; sans lui, aucune alerte n'atteint le téléphone du gérant |
+| `AVISIO_DEMO_MODE` actif | Voir §2 ter |
+
+Les fournisseurs manquants (Resend, VAPID, Google, Anthropic) produisent des
+**avertissements**, pas un refus : exploiter sans e-mail transactionnel est une
+décision commerciale, pas une faute de configuration. Mais elle est dite, au
+démarrage, en clair.
+
+## 2 quinquies. Une réponse non publiée n'est jamais marquée « répondu »
+
+Un avis passait en `answered` dès que le gérant validait son texte — même
+quand la plateforme n'était pas connectée et que rien n'était parti. Le gérant
+croyait avoir répondu publiquement, son client ne voyait jamais la réponse, et
+le **taux de réponse affiché** — un indicateur vendu — comptait des réponses
+inexistantes.
+
+Cinq états désormais, et `answered` signifie *publié et confirmé par la
+plateforme*, rien de moins : `new`, `draft_ready`, `reply_pending`,
+`answered`, `reply_failed`. Le texte du gérant est conservé dans tous les
+cas — le perdre parce que Google est injoignable serait le punir d'une panne
+qui n'est pas la sienne.
 
 ## 3. Authentification
 
@@ -257,6 +342,40 @@ Nommé, pas caché.
 | Pas de journal d'audit des actions admin | moyenne | Les journaux applicatifs existent, pas de piste dédiée |
 | Dépendances non auditées en continu | faible | Ajouter `npm audit` à l'intégration continue |
 | En-têtes de sécurité HTTP | faible | À poser au niveau du proxy (CSP, HSTS) |
+| `scryptSync` bloque la boucle d'événements | **moyenne** | Mesuré, non corrigé — voir ci-dessous |
+
+### La vérification de mot de passe gèle tout le serveur
+
+`verifyPassword` (`apps/api/src/auth.ts`) appelle `scryptSync`. Le nom dit
+l'essentiel : l'appel est **synchrone**, et Node n'a qu'une boucle
+d'événements. Pendant la dérivation, le processus entier ne répond plus — ni
+aux scans clients, ni à la sonde de santé, ni au limiteur de débit lui-même.
+
+Mesure du 21 septembre 2026, dix tentatives simultanées avec un mauvais mot
+de passe, réponses en millisecondes :
+
+```
+135  252  369  485  602  716  833  948  1066  1189
+```
+
+Parfaitement sérialisées, ~117 ms d'écart : c'est la boucle bloquée, une
+dérivation à la fois. Dix mauvais mots de passe figent l'API 1,2 s.
+
+Portée réelle :
+
+- **Un attaquant n'a besoin d'aucun compte valide.** Des mots de passe faux
+  suffisent, et ils coûtent exactement le même calcul qu'un vrai.
+- **Le limiteur de débit ne protège pas de ceci**, parce qu'il s'exécute sur
+  la boucle déjà bloquée. Le budget par adresse (100 / 15 min) plafonne une
+  source unique, pas un ensemble d'adresses — ni un simple parc derrière NAT.
+- **L'usage légitime souffre aussi** : les connexions du matin se mettent en
+  file au lieu de se croiser.
+
+Correctif connu : la variante asynchrone de `scrypt`, qui s'exécute sur le
+groupe de fils libuv au lieu de la boucle. Le coût CPU ne change pas, mais il
+cesse d'être exclusif. Non appliqué à ce jour — trouvé en instruisant un test
+intermittent, hors du périmètre en cours, signalé plutôt que corrigé en
+silence.
 
 ## 10. Signaler une faille
 

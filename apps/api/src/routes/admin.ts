@@ -14,6 +14,7 @@ import {
   PLANS,
   commitmentEndsAt,
   computeMetrics,
+  entitlementDrift,
   formatEuros,
   generateId,
   generateSlug,
@@ -143,6 +144,11 @@ export async function registerAdminRoutes(app: FastifyInstance): Promise<void> {
         mrrLabel: formatEuros(subscription ? monthlyCents(subscription) : 0),
         startedAt: subscription?.startedAt ?? establishment.createdAt,
         commitmentEndsAt: subscription ? commitmentEndsAt(subscription) : null,
+        // Signale un etablissement dont l offre ne correspond pas a sa facture.
+        // Nul en fonctionnement normal ; non nul, c est une ecriture partielle
+        // ou une modification indue, et cela doit se voir ici plutot que six
+        // mois plus tard en comparant une facture a un usage.
+        entitlementDrift: entitlementDrift(subscription, establishment),
         overdueInvoices: overdue.length,
         reviews: own.length,
         averageRating: computeMetrics(own).averageRating,

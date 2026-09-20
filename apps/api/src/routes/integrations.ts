@@ -10,7 +10,7 @@
  * correspondrait plus (ordre des clés, espaces).
  */
 
-import { hasFeature, type PosTicket } from '@avisio/core';
+import { hasEntitlement, type PosTicket } from '@avisio/core';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { assertAccess, httpError } from '../app.js';
@@ -94,7 +94,8 @@ export async function registerIntegrationRoutes(app: FastifyInstance): Promise<v
     const establishment = await repo.establishments.findById(id);
     if (!establishment) throw httpError(404, 'Établissement introuvable.');
 
-    const entitled = hasFeature(establishment.plan, establishment.addons, 'pos_integration');
+    const droits = await app.ctx.entitlements.forEstablishment(establishment);
+    const entitled = hasEntitlement(droits, 'pos_integration');
     const credential = await repo.pos.getCredential(id);
     const since = new Date(Date.now() - 30 * 86_400_000).toISOString();
 
@@ -118,7 +119,8 @@ export async function registerIntegrationRoutes(app: FastifyInstance): Promise<v
 
     const establishment = await repo.establishments.findById(id);
     if (!establishment) throw httpError(404, 'Établissement introuvable.');
-    if (!hasFeature(establishment.plan, establishment.addons, 'pos_integration')) {
+    const droits = await app.ctx.entitlements.forEstablishment(establishment);
+    if (!hasEntitlement(droits, 'pos_integration')) {
       throw httpError(402, "L'intégration caisse est comprise dans l'offre Premium.");
     }
 

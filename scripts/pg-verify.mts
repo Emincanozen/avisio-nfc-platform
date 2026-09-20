@@ -152,6 +152,56 @@ try {
     );
   }
 
+  section('Propriete des abonnements push');
+
+  if (cible) {
+    // Ces methodes sont ce qui empeche un gerant de s'approprier l'appareil
+    // d'un autre. Elles n'existent que dans l'adaptateur : la suite de tests,
+    // qui tourne en memoire, ne les exerce jamais contre PostgreSQL.
+    const managers = await repo.managers.listAll();
+    const proprietaire = managers[0];
+    const endpoint = `https://push.example.test/${marker}`;
+
+    check('un gerant existe pour le test', proprietaire != null);
+
+    if (proprietaire) {
+      await repo.push.subscribe({
+        id: `psub_${marker}`,
+        managerId: proprietaire.id,
+        endpoint,
+        p256dh: 'cle-publique-de-verification',
+        auth: 'secret-de-verification',
+        createdAt: new Date().toISOString(),
+      });
+
+      const relu = await repo.push.findByEndpoint(endpoint);
+      check('abonnement retrouve par point de terminaison', relu?.managerId === proprietaire.id);
+      check(
+        'un point de terminaison inconnu renvoie null',
+        (await repo.push.findByEndpoint(`${endpoint}-inexistant`)) === null,
+      );
+
+      // Le cas normal : le navigateur regenere ses cles et reenregistre. Le
+      // proprietaire ne doit pas changer, et la ligne ne doit pas se dupliquer.
+      await repo.push.subscribe({
+        id: `psub_${marker}`,
+        managerId: proprietaire.id,
+        endpoint,
+        p256dh: 'cle-publique-renouvelee',
+        auth: 'secret-renouvele',
+        createdAt: new Date().toISOString(),
+      });
+      const apres = await repo.push.listByManager(proprietaire.id);
+      check(
+        'un reenregistrement ne duplique pas la ligne',
+        apres.filter((s) => s.endpoint === endpoint).length === 1,
+      );
+
+      await repo.push.unsubscribe(endpoint);
+      check('desabonnement effectif', (await repo.push.findByEndpoint(endpoint)) === null);
+    }
+  }
+
   section('Provenance des avis');
 
   if (cible) {

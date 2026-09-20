@@ -433,8 +433,21 @@ describe('avis et réponses', () => {
       payload: { text: suggestion.json().text },
     });
     expect(published.statusCode).toBe(200);
-    expect(published.json().review.status).toBe('answered');
     expect(published.json().warnings).toEqual([]);
+
+    // Le texte du gérant est toujours conservé : le perdre parce que la
+    // plateforme est injoignable serait le punir d'une panne qui n'est pas la
+    // sienne.
+    expect(published.json().review.replyText).toBeTruthy();
+
+    // Les connecteurs de ce test sont simulés : rien n'est réellement publié.
+    // Le statut doit le dire, et `published` doit rester faux. Auparavant
+    // l'avis passait en `answered`, ce qui gonflait un taux de réponse vendu
+    // au client avec des réponses que personne n'a jamais vues.
+    expect(published.json().review.status).toBe('reply_pending');
+    expect(published.json().published).toBe(false);
+    expect(published.json().outcome).toBe('pending');
+    expect(published.json().detail).toContain('pas connectée');
   });
 
   it('signale une réponse non conforme sans la bloquer', async () => {

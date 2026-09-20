@@ -100,6 +100,19 @@ export const env = {
    * périme pas quand l'hébergeur change ses plages d'adresses.
    */
   trustProxy: parseTrustProxy(str('TRUST_PROXY')),
+
+  /**
+   * Mode démonstration.
+   *
+   * Il autorise les connecteurs simulés, qui **fabriquent des avis**. Sans
+   * lui, un établissement dont la plateforme n'est pas connectée reste
+   * simplement muet — ce qui est la vérité — au lieu de voir arriver de faux
+   * avis, de fausses alertes et des statistiques inventées.
+   *
+   * C'est le seul réglage capable de contaminer une vraie base : le contrôle
+   * de configuration refuse le démarrage s'il est actif en production.
+   */
+  demoMode: str('AVISIO_DEMO_MODE').toLowerCase() === 'true',
 } as const;
 
 function parseTrustProxy(raw: string): boolean | number | string[] {
@@ -133,6 +146,16 @@ export const capabilities = {
   email: env.resendApiKey.length > 0,
   /** false => push journalisés en console. */
   push: env.vapid.publicKey.length > 0 && env.vapid.privateKey.length > 0,
+  /**
+   * Connecteurs simulés autorisés.
+   *
+   * La double condition n'est pas redondante : le contrôle de configuration
+   * refuse déjà le démarrage en production avec `AVISIO_DEMO_MODE`, mais une
+   * instance lancée autrement — un script, un test, un binaire exécuté à la
+   * main — contournerait ce contrôle. Ici, la simulation est impossible en
+   * production quel que soit le chemin emprunté.
+   */
+  demoMode: env.demoMode && env.nodeEnv !== 'production',
 } as const;
 
 export function describeMode(): string {
@@ -141,9 +164,15 @@ export function describeMode(): string {
   return [
     mode('persistance', capabilities.persistence, 'mémoire (démo)'),
     mode('LLM', capabilities.llm, 'heuristique locale'),
-    mode('Google', capabilities.googleReviews, 'simulé'),
+    // « non connecté » et non « simulé » : hors mode démonstration, aucune
+    // donnée n'est fabriquée. Annoncer une simulation qui n'a pas lieu ferait
+    // chercher de faux avis là où il n'y a rien du tout.
+    mode('Google', capabilities.googleOAuth, 'non connecté'),
     mode('email', capabilities.email, 'console'),
     mode('push', capabilities.push, 'console'),
+    // Annoncé au démarrage, en majuscules : lire « MODE DÉMONSTRATION » dans
+    // le journal d'un serveur censé servir de vrais clients doit sauter aux yeux.
+    capabilities.demoMode ? 'MODE DÉMONSTRATION (avis fabriqués)' : 'données réelles',
   ].join(' · ');
 }
 

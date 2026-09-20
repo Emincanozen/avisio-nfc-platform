@@ -12,6 +12,8 @@ export * from './notifications.js';
 export * from './report.js';
 export * from './pos.js';
 export * from './i18n.js';
+export * from './config-guard.js';
+export * from './entitlements.js';
 export * from './format.js';
 export * from './ids.js';
 export * from './ratelimit.js';

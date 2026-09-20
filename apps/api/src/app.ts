@@ -23,9 +23,11 @@ import { createAnalyticsService } from './services/analytics.js';
 import { createBillingService, type PaymentProvider } from './services/billing.js';
 import {
   createGoogleConnector,
+  createInactiveConnector,
   createSimulatedConnector,
   type ReviewConnector,
 } from './services/google.js';
+import { createEntitlementService, type EntitlementService } from './services/entitlements.js';
 import { createGoogleTokenService, type GoogleTokenService } from './services/google-tokens.js';
 import { createIngestService } from './services/ingest.js';
 import { createNotifier, type Notifier } from './services/notify.js';
@@ -63,6 +65,8 @@ export interface AppContext {
   reports: ReturnType<typeof createReportService>;
   pos: ReturnType<typeof createPosService>;
   googleTokens: GoogleTokenService;
+  /** Droits effectifs, lus depuis l abonnement facture. Voir services/entitlements.ts */
+  entitlements: EntitlementService;
 }
 
 declare module 'fastify' {
@@ -134,6 +138,22 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
    * de développer tout le pipeline sans accès partenaire, à condition que
    * l'interface le dise, ce qu'elle fait via `/health`.
    */
+  /**
+   * Repli d'une plateforme non connectée.
+   *
+   * En démonstration : un simulateur, qui produit des avis marqués `demo` et
+   * exclus de toute métrique. Partout ailleurs : **rien**.
+   *
+   * C'était le défaut le plus insidieux du produit. Sans accès Google, le
+   * simulateur tournait quand même, et sur une vraie base PostgreSQL il y
+   * écrivait de faux avis, de fausses alertes et de fausses statistiques. Le
+   * client voyait son tableau de bord se remplir d'avis qui n'existaient pas.
+   * Une plateforme non connectée doit rester muette : c'est la vérité, et
+   * c'est ce que l'interface affiche désormais.
+   */
+  const repliNonConnecte = (platform: PlatformId): ReviewConnector =>
+    capabilities.demoMode ? createSimulatedConnector(platform) : createInactiveConnector(platform);
+
   const connectors =
     deps.connectors ??
     new Map<PlatformId, ReviewConnector>([
@@ -141,12 +161,15 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
         'google',
         capabilities.googleOAuth
           ? createGoogleConnector(logger, (id) => googleTokens.accessTokenFor(id))
-          : createSimulatedConnector('google'),
+          : repliNonConnecte('google'),
       ],
-      ['tripadvisor', createSimulatedConnector('tripadvisor')],
-      ['facebook', createSimulatedConnector('facebook')],
-      ['yelp', createSimulatedConnector('yelp')],
-      ['thefork', createSimulatedConnector('thefork')],
+      // Aucun accès partenaire n'a été demandé pour ces quatre plateformes.
+      // Le routage NFC y envoie les clients — ça, c'est réel — mais aucun
+      // avis n'en revient. Voir docs/etat-des-lieux.md.
+      ['tripadvisor', repliNonConnecte('tripadvisor')],
+      ['facebook', repliNonConnecte('facebook')],
+      ['yelp', repliNonConnecte('yelp')],
+      ['thefork', repliNonConnecte('thefork')],
     ]);
 
   const ctx: AppContext = {
@@ -156,6 +179,7 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
     push,
     connectors,
     googleTokens,
+    entitlements: createEntitlementService(deps.repo),
     analytics: createAnalyticsService(deps.repo),
     ingest: createIngestService({ repo: deps.repo, connectors, llm, notifier, logger }),
     billing: createBillingService({
@@ -302,8 +326,13 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
       return;
     }
 
+    // Le code machine posé par l'appelant est transmis tel quel : c'est ce qui
+    // permet à l'interface de distinguer deux refus de même statut sans
+    // analyser un message écrit pour un humain.
+    const code = (error as { code?: string }).code;
     void reply.code(status).send({
       error: status >= 500 ? 'Erreur interne.' : (err.message ?? 'Requête invalide.'),
+      ...(code && status < 500 ? { code } : {}),
     });
   });
 

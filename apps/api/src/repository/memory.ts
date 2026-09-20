@@ -363,6 +363,9 @@ export function createMemoryRepository(options: { seed?: boolean } = {}): Reposi
         pushSubscriptions.set(record.endpoint, record);
         return record;
       },
+      async findByEndpoint(endpoint) {
+        return pushSubscriptions.get(endpoint) ?? null;
+      },
       async listByManager(managerId) {
         return [...pushSubscriptions.values()].filter((s) => s.managerId === managerId);
       },

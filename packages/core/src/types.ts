@@ -86,7 +86,32 @@ export interface ScanEvent {
   createdAt: string;
 }
 
-export type ReviewStatus = 'new' | 'draft_ready' | 'answered' | 'ignored';
+/**
+ * Cycle de vie d'une réponse à un avis.
+ *
+ * `answered` signifie **publié et confirmé par la plateforme**, rien d'autre.
+ * La distinction avec `reply_pending` corrige un défaut réel : un avis était
+ * marqué répondu même quand la plateforme n'était pas connectée et que rien
+ * n'avait été publié. Le gérant croyait avoir répondu publiquement ; son
+ * client ne voyait jamais la réponse, et le taux de réponse affiché — un
+ * indicateur vendu — comptait des réponses qui n'existaient pas.
+ *
+ * | Statut          | Ce qu'il veut dire                                    |
+ * |-----------------|-------------------------------------------------------|
+ * | `new`           | rien n'a été fait                                     |
+ * | `draft_ready`   | une suggestion existe, non validée par le gérant       |
+ * | `reply_pending` | texte validé, publication **non confirmée**           |
+ * | `answered`      | publié et confirmé par la plateforme                   |
+ * | `reply_failed`  | la plateforme a refusé la publication                  |
+ * | `ignored`       | le gérant a décidé de ne pas répondre                  |
+ */
+export type ReviewStatus =
+  | 'new'
+  | 'draft_ready'
+  | 'reply_pending'
+  | 'answered'
+  | 'reply_failed'
+  | 'ignored';
 
 export interface Review {
   id: string;
@@ -103,14 +128,18 @@ export interface Review {
   /**
    * Provenance de l'avis.
    *
-   * `sync` : rapatrié par un connecteur de plateforme.
+   * `sync` : rapatrié d'une plateforme par un connecteur **réel**.
    * `import` : chargé à la main depuis un export, en attendant l'accès API.
+   * `demo` : **fabriqué** par le connecteur simulé, en mode démonstration.
    *
-   * Absent sur les avis antérieurs à ce champ, traités comme `sync`. La
-   * distinction existe pour qu'aucun chiffre du tableau de bord ne puisse
-   * laisser croire à une connexion en direct qui n'existe pas.
+   * Absent sur les avis antérieurs à ce champ, traités comme `sync`.
+   *
+   * `demo` est la distinction qui compte : un avis fabriqué ne doit jamais
+   * entrer dans une métrique montrée au client, ni pouvoir être confondu avec
+   * un avis réel. Le simulateur tournait auparavant sans marquage, y compris
+   * sur une base PostgreSQL de production.
    */
-  source?: 'sync' | 'import';
+  source?: 'sync' | 'import' | 'demo';
   status: ReviewStatus;
   replyText?: string;
   repliedAt?: string;

@@ -71,7 +71,22 @@ describe('politique', () => {
   });
 });
 
-describe('connexion', () => {
+/**
+ * Ces cas franchissent le vrai chemin d'authentification : chaque tentative
+ * dérive un scrypt complet (~120 ms au repos), et il en faut jusqu'à quinze
+ * par cas, plus deux pour semer le compte de démonstration. Soit ~2,4 s de
+ * calcul pur, contre les 5 s que Vitest accorde par défaut.
+ *
+ * Cette marge de 2× a déjà lâché : le cas du forçage a expiré une fois en
+ * suite complète, sans rien de cassé. Sur un exécuteur GitHub à deux cœurs,
+ * trois à quatre fois plus lent que ce poste, elle ne tient pas.
+ *
+ * Le délai est donc calé sur le coût réel, sans toucher à une seule
+ * assertion. Un vrai blocage reste attrapé — c'est tout ce qu'un délai doit
+ * détecter. Réduire le coût du scrypt pour aller plus vite reviendrait à
+ * tester autre chose que la production.
+ */
+describe('connexion', { timeout: 30_000 }, () => {
   it('coupe le forçage de mot de passe sur un compte', async () => {
     const instance = await freshApp();
     const budget = RATE_RULES.login.limit;
