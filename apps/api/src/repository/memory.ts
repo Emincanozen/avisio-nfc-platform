@@ -24,6 +24,7 @@ import {
 import { buildDemoDataset } from '../demo-data.js';
 import type {
   GoogleConnectionRecord,
+  PendingLineRecord,
   PendingPushRecord,
   PosCredentialRecord,
   PosTicketRecord,
@@ -46,6 +47,7 @@ export function createMemoryRepository(options: { seed?: boolean } = {}): Reposi
   const subscriptions = new Map<string, Subscription>();
   const invoices = new Map<string, Invoice>();
   const invoiceCounters = new Map<number, number>();
+  const pendingLines = new Map<string, PendingLineRecord>();
   const pushSubscriptions = new Map<string, PushSubscriptionRecord>(); // clé: endpoint
   const pendingPushes = new Map<string, PendingPushRecord>();
   const preferences = new Map<string, NotificationPreferences>();
@@ -342,7 +344,7 @@ export function createMemoryRepository(options: { seed?: boolean } = {}): Reposi
        * démonstration facturerait autrement que la vraie base, et le défaut
        * ne se verrait qu'une fois chez le client.
        */
-      async issueForPeriod(invoice, year, advance) {
+      async issueForPeriod(invoice, year, advance, consumePendingLineIds = []) {
         const existante = [...invoices.values()].find(
           (i) => i.subscriptionId === invoice.subscriptionId && i.periodStart === invoice.periodStart,
         );
@@ -364,6 +366,15 @@ export function createMemoryRepository(options: { seed?: boolean } = {}): Reposi
             currentPeriodStart: advance.periodStart,
             currentPeriodEnd: advance.periodEnd,
           });
+        }
+
+        // Marquées consommées ici, jamais ailleurs : portées sans être
+        // marquées, elles repasseraient sur la facture du mois suivant.
+        for (const id of consumePendingLineIds) {
+          const ligne = pendingLines.get(id);
+          if (ligne && ligne.invoiceId === null) {
+            pendingLines.set(id, { ...ligne, invoiceId: created.id });
+          }
         }
 
         return { invoice: created, created: true };
@@ -391,6 +402,25 @@ export function createMemoryRepository(options: { seed?: boolean } = {}): Reposi
         const next = { ...current, ...patch, id };
         invoices.set(id, next);
         return next;
+      },
+    },
+
+    pendingLines: {
+      async add(subscriptionId, lines) {
+        const enregistrees = lines.map((line) => ({
+          id: nextId('pline'),
+          subscriptionId,
+          line,
+          createdAt: new Date().toISOString(),
+          invoiceId: null,
+        }));
+        for (const l of enregistrees) pendingLines.set(l.id, l);
+        return enregistrees;
+      },
+      async listPending(subscriptionId) {
+        return [...pendingLines.values()]
+          .filter((l) => l.subscriptionId === subscriptionId && l.invoiceId === null)
+          .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
       },
     },
 

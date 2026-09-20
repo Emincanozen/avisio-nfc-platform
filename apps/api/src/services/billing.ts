@@ -118,6 +118,11 @@ export function createBillingService(deps: Deps) {
     options: { includeOneOff?: boolean } = {},
   ): Promise<{ invoice: Invoice; created: boolean }> {
     const year = new Date(now).getUTCFullYear();
+
+    // Prorata d'un changement d'offre survenu pendant la période : il a été
+    // mis en attente par `changePlan`, c'est ici qu'il devient facturable.
+    const enAttente = await repo.pendingLines.listPending(subscription.id);
+
     const draft = buildInvoice({
       subscription,
       periodStart: subscription.currentPeriodStart,
@@ -125,6 +130,7 @@ export function createBillingService(deps: Deps) {
       // Le numéro réel est attribué par le dépôt, dans la même transaction.
       sequence: 0,
       issuedAt: now,
+      ...(enAttente.length > 0 ? { extraLines: enAttente.map((l) => l.line) } : {}),
       ...(options.includeOneOff ? { includeOneOff: true } : {}),
     });
 
@@ -133,11 +139,16 @@ export function createBillingService(deps: Deps) {
     // concurrents ne peuvent plus produire deux factures du même mois : le
     // perdant se voit rendre celle du gagnant.
     const period = nextPeriod(subscription);
-    const { invoice, created } = await repo.invoices.issueForPeriod(draft, year, {
-      subscriptionId: subscription.id,
-      periodStart: period.start,
-      periodEnd: period.end,
-    });
+    const { invoice, created } = await repo.invoices.issueForPeriod(
+      draft,
+      year,
+      {
+        subscriptionId: subscription.id,
+        periodStart: period.start,
+        periodEnd: period.end,
+      },
+      enAttente.map((l) => l.id),
+    );
 
     // Déjà facturée : ni encaissement, ni courriel. Réencaisser ferait payer
     // deux fois, et renvoyer l'avis d'échéance inquiéterait un client qui a
@@ -226,6 +237,13 @@ export function createBillingService(deps: Deps) {
         subscription.currentPeriodEnd,
         now,
       );
+
+      // Mises en attente, pas jetées. Elles étaient calculées, affichées au
+      // back-office, puis perdues à la fin de la requête : un client qui
+      // montait en gamme le 3 du mois ne payait pas le complément, et un
+      // client qui descendait ne recevait pas son avoir. Personne ne s'en
+      // plaignait — c'est bien le problème d'un montant qui disparaît.
+      if (lines.length > 0) await repo.pendingLines.add(subscriptionId, lines);
 
       await repo.establishments.update(subscription.establishmentId, { plan, addons });
 

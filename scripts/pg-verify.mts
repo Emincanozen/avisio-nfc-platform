@@ -393,6 +393,87 @@ try {
     }
     check('la base refuse elle-meme un doublon de periode', refusee);
   }
+
+  // -------------------------------------------------------------------------
+  section('Prorata : reporte sur la facture suivante');
+
+  // Table neuve : `pending_invoice_lines` n'a jamais vu PostgreSQL avant
+  // aujourd'hui. Le typecheck ne dit rien d'une colonne mal nommee.
+  {
+    const { createBillingService } = await import('../apps/api/src/services/billing.ts');
+    const { generateId, addMonths } = await import('../packages/core/src/index.ts');
+
+    const muet = { info: () => {}, warn: () => {} };
+    const sansCourrier = {
+      billing: async () => {},
+      alert: async () => {},
+      monthlyReport: async () => {},
+    };
+    const facturation = createBillingService({ repo, notifier: sansCourrier, logger: muet });
+
+    const etab = await repo.establishments.create({
+      id: generateId('est'),
+      name: `Prorata ${marker}`,
+      postalCode: '69002',
+      sector: 'restaurant',
+      plan: 'essentiel',
+      addons: [],
+      committed12Months: false,
+      brandTone: 'professionnel et courtois',
+      defaultLocale: 'fr',
+      createdAt: new Date().toISOString(),
+    });
+
+    const instant = new Date().toISOString();
+    const abo = await repo.subscriptions.create({
+      id: generateId('sub'),
+      establishmentId: etab.id,
+      plan: 'essentiel',
+      addons: [],
+      extraPlatforms: 0,
+      tags: 1,
+      committed12Months: false,
+      status: 'active',
+      startedAt: addMonths(instant, -1),
+      currentPeriodStart: addMonths(instant, -1),
+      currentPeriodEnd: instant,
+    });
+
+    // Changement d'offre a mi-periode.
+    const milieu = new Date(new Date(instant).getTime() - 15 * 86_400_000).toISOString();
+    const changement = await facturation.changePlan(abo.id, 'pro', [], milieu);
+    check('le changement d offre produit un prorata', changement.prorationCents !== 0);
+
+    const enAttente = await repo.pendingLines.listPending(abo.id);
+    check('les lignes de prorata sont ecrites en base', enAttente.length > 0, `${enAttente.length} ligne(s)`);
+
+    await facturation.runBilling(instant);
+    const [facture] = await repo.invoices.listByEstablishment(etab.id);
+    const lignesProrata = facture.lines.filter(
+      (l) => l.kind === 'proration' || l.kind === 'credit',
+    );
+    check('le prorata est porte sur la facture', lignesProrata.length > 0);
+    check(
+      'le total de la facture inclut le prorata',
+      facture.lines.reduce((t, l) => t + l.totalCents, 0) === facture.subtotalCents,
+    );
+
+    const restantes = await repo.pendingLines.listPending(abo.id);
+    check('plus aucune ligne en attente apres facturation', restantes.length === 0);
+
+    // Le mois suivant ne doit pas reporter le meme prorata : c'est la
+    // difference entre « porte » et « marque consomme dans la transaction ».
+    await facturation.runBilling(addMonths(instant, 1));
+    const toutes = await repo.invoices.listByEstablishment(etab.id);
+    const avecProrata = toutes.filter((f) =>
+      f.lines.some((l) => l.kind === 'proration' || l.kind === 'credit'),
+    );
+    check(
+      'le prorata n est facture qu une seule fois',
+      avecProrata.length === 1,
+      `${avecProrata.length} facture(s) sur ${toutes.length} portent un prorata`,
+    );
+  }
 } finally {
   // Nettoyage : ce script ne laisse rien derriere lui.
   await repo.close().catch(() => undefined);

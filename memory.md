@@ -358,6 +358,27 @@ réécrite. Le port n'expose aucune suppression, et `update` ne laisse passer
 que `status`, `paidAt`, `paymentReference` et `remindersSent`. Ni montant, ni
 lignes, ni période, ni numéro.
 
+### D18 — Un montant calculé qui n'est pas écrit est un montant perdu
+
+*Pourquoi* : `changePlan` calculait le prorata d'un changement d'offre,
+l'affichait au back-office, puis le jetait à la fin de la requête. Un client
+qui montait en gamme le 3 du mois ne payait pas le complément ; un client qui
+descendait ne recevait pas son avoir. Personne ne s'en plaignait — c'est
+exactement le problème d'un montant qui disparaît en silence.
+
+*Table `pending_invoice_lines`* : les lignes attendent la prochaine facture.
+`buildInvoice` savait déjà les recevoir (`extraLines`), il ne manquait que la
+persistance.
+
+*Consommées dans la transaction d'émission*, pas avant ni après. Portées sans
+être marquées, elles repasseraient sur la facture suivante ; marquées sans
+être portées, elles disparaîtraient. C'est la leçon de **D17** appliquée une
+seconde fois.
+
+*Jamais supprimées* : `invoiceId` dit sur quelle facture la ligne est partie.
+Supprimer ferait disparaître la justification d'un montant porté sur une
+pièce comptable.
+
 ## 4. Travail effectué
 
 ### Session du 21 septembre 2026 — P2.5 : double facturation sous concurrence
@@ -388,6 +409,12 @@ pas technique : une facture déjà envoyée ne se supprime pas sans avoir. Voir
 **Aussi corrigé chemin faisant** : le contrôle de secrets pouvait passer au
 vert sans rien chercher (voir la section sécurité de `docs/securite.md`), et
 le test intermittent de limitation de débit est élucidé.
+
+**P2.6 dans la foulée — prorata persisté.** Voir **D18**. Nouvelle table
+`pending_invoice_lines`, présente dans les deux adaptateurs. 387 tests
+(3 ajoutés, les 3 échouent sans le correctif), **36/36** sur `pg-verify`
+(6 contrôles ajoutés sur une table qui n'avait jamais vu PostgreSQL),
+**56/56** de bout en bout avec l'API compilée.
 
 ### Session du 20 septembre 2026 (2) — défauts P1 : sécurité, droits, intégrité
 
@@ -585,15 +612,14 @@ verrouillait le compte dont il avait besoin. Voir D12.
 
 ### Prochaine action concrète
 
-**P2.6 — prorata persisté.** P1 et P2.5 sont corrigés, testés et poussés.
-`changePlan` calcule des lignes de prorata et les **jette** : elles ne sont
-écrites nulle part, donc la facture suivante ne les portera pas. Un
-changement d'offre en cours de mois n'est aujourd'hui facturé ni dans un
-sens ni dans l'autre.
+**P2.7 — clarifier le modèle de période.** P1, P2.5, P2.6 et P2.8 sont
+corrigés, testés et poussés. Reste à trancher ce que `currentPeriodStart` et
+`currentPeriodEnd` désignent exactement au regard de la facturation à terme
+échu ou à échoir, et à le documenter — plusieurs lectures cohabitent
+aujourd'hui dans le code.
 
-Puis, dans l'ordre : modèle de période (P2.7), mentions légales des factures
-(P2.9). En parallèle et indépendant du code : demande d'accès Google
-(priorité 1.1, délai long), déploiement (1.2).
+Puis : mentions légales des factures (P2.9). En parallèle et indépendant du
+code : demande d'accès Google (priorité 1.1, délai long), déploiement (1.2).
 
 ---
 

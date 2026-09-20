@@ -13,6 +13,7 @@ import type {
   Alert,
   Establishment,
   Invoice,
+  InvoiceLine,
   LoyaltyMember,
   Manager,
   NfcTag,
@@ -41,6 +42,21 @@ export interface ReviewQuery {
    */
   platform?: Review['platform'];
   limit?: number;
+}
+
+/**
+ * Une ligne en attente, telle que le dépôt la conserve.
+ *
+ * `invoiceId` reste null tant qu'elle attend ; une fois renseigné, la ligne
+ * devient une trace de ce qui justifie un montant sur une facture, et ne
+ * sera plus jamais reportée.
+ */
+export interface PendingLineRecord {
+  id: string;
+  subscriptionId: string;
+  line: InvoiceLine;
+  createdAt: string;
+  invoiceId: string | null;
 }
 
 export interface PushSubscriptionRecord {
@@ -230,6 +246,13 @@ export interface Repository {
       invoice: Omit<Invoice, 'id' | 'number'>,
       year: number,
       advance: { subscriptionId: string; periodStart: string; periodEnd: string },
+      /**
+       * Lignes en attente portées sur cette facture. Elles sont marquées
+       * consommées **dans la même transaction** : les porter sans les
+       * marquer les referait payer au mois suivant, les marquer sans les
+       * porter les perdrait.
+       */
+      consumePendingLineIds?: string[],
     ): Promise<{ invoice: Invoice; created: boolean }>;
     findById(id: string): Promise<Invoice | null>;
     listByEstablishment(establishmentId: string): Promise<Invoice[]>;
@@ -237,6 +260,18 @@ export interface Repository {
     /** Factures ouvertes dont l'échéance est dépassée. */
     listOverdue(now: string): Promise<Invoice[]>;
     update(id: string, patch: Partial<Invoice>): Promise<Invoice>;
+  };
+
+  /**
+   * Lignes en attente de facturation — prorata d'un changement d'offre.
+   *
+   * Elles ne portent pas de montant dû tant qu'elles ne sont pas sur une
+   * facture : ce sont des éléments à reporter, pas une créance.
+   */
+  pendingLines: {
+    add(subscriptionId: string, lines: InvoiceLine[]): Promise<PendingLineRecord[]>;
+    /** Lignes pas encore portées sur une facture. */
+    listPending(subscriptionId: string): Promise<PendingLineRecord[]>;
   };
 
   // -------------------------------------------------------------------------

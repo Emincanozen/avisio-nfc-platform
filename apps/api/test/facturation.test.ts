@@ -161,6 +161,71 @@ describe('une période, une facture', () => {
   });
 });
 
+describe('prorata d’un changement d’offre', () => {
+  it("reporte le prorata sur la facture suivante au lieu de le perdre", async () => {
+    const repo = createMemoryRepository({ seed: false });
+    const { notifier } = notifierMuet();
+    const facturation = createBillingService({ repo, notifier, logger: silencieux });
+    const { etablissement, abonnement } = await terrain(repo);
+
+    // Montée en gamme à mi-période. Le calcul existait déjà et s'affichait au
+    // back-office ; il n'était simplement écrit nulle part, donc la facture
+    // suivante ne le portait pas et le complément n'était jamais encaissé.
+    const changement = await facturation.changePlan(
+      abonnement.id,
+      'pro',
+      [],
+      '2026-09-06T10:00:00.000Z',
+    );
+    expect(changement.prorationCents).not.toBe(0);
+
+    await facturation.runBilling(MAINTENANT);
+    const [facture] = await repo.invoices.listByEstablishment(etablissement.id);
+
+    const prorata = facture!.lines.filter(
+      (l) => l.kind === 'proration' || l.kind === 'credit',
+    );
+    expect(prorata.length).toBeGreaterThan(0);
+    expect(facture!.lines.reduce((t, l) => t + l.totalCents, 0)).toBe(facture!.subtotalCents);
+  });
+
+  it('ne facture le même prorata qu’une seule fois', async () => {
+    const repo = createMemoryRepository({ seed: false });
+    const { notifier } = notifierMuet();
+    const facturation = createBillingService({ repo, notifier, logger: silencieux });
+    const { etablissement, abonnement } = await terrain(repo);
+
+    await facturation.changePlan(abonnement.id, 'pro', [], '2026-09-06T10:00:00.000Z');
+    await facturation.runBilling(MAINTENANT);
+    // Le mois suivant : le prorata a déjà été porté, il ne doit pas revenir.
+    await facturation.runBilling(addMonths(MAINTENANT, 1));
+
+    const factures = await repo.invoices.listByEstablishment(etablissement.id);
+    expect(factures).toHaveLength(2);
+
+    const avecProrata = factures.filter((f) =>
+      f.lines.some((l) => l.kind === 'proration' || l.kind === 'credit'),
+    );
+    expect(avecProrata).toHaveLength(1);
+  });
+
+  it('ne laisse aucune ligne en attente après facturation', async () => {
+    const repo = createMemoryRepository({ seed: false });
+    const { notifier } = notifierMuet();
+    const facturation = createBillingService({ repo, notifier, logger: silencieux });
+    const { abonnement } = await terrain(repo);
+
+    await facturation.changePlan(abonnement.id, 'pro', [], '2026-09-06T10:00:00.000Z');
+    expect(await repo.pendingLines.listPending(abonnement.id)).not.toHaveLength(0);
+
+    await facturation.runBilling(MAINTENANT);
+
+    // Une ligne consommée n'est pas supprimée, elle porte l'identifiant de
+    // sa facture : c'est ce qui justifie le montant sur la pièce comptable.
+    expect(await repo.pendingLines.listPending(abonnement.id)).toHaveLength(0);
+  });
+});
+
 describe('ce que la correction ne doit pas casser', () => {
   it('facture bien la période suivante le mois d’après', async () => {
     const repo = createMemoryRepository({ seed: false });

@@ -8,11 +8,12 @@
  * jamais vu la base — ce qui est exactement le cas de l'environnement de démo.
  */
 
-import { formatInvoiceNumber } from '@avisio/core';
+import { formatInvoiceNumber, generateId } from '@avisio/core';
 import type {
   Alert,
   Establishment,
   Invoice,
+  InvoiceLine,
   LoyaltyMember,
   Manager,
   NfcTag,
@@ -25,6 +26,7 @@ import type {
 } from '@avisio/core';
 import type {
   GoogleConnectionRecord,
+  PendingLineRecord,
   PendingPushRecord,
   PosCredentialRecord,
   PosTicketRecord,
@@ -41,6 +43,8 @@ interface Delegate {
   findUnique(args: Row): Promise<Row | null>;
   create(args: Row): Promise<Row>;
   update(args: Row): Promise<Row>;
+  updateMany(args: Row): Promise<{ count: number }>;
+  createMany(args: Row): Promise<{ count: number }>;
   upsert(args: Row): Promise<Row>;
   delete(args: Row): Promise<Row>;
   deleteMany(args?: Row): Promise<{ count: number }>;
@@ -59,6 +63,7 @@ interface PrismaLike {
   subscription: Delegate;
   invoice: Delegate;
   invoiceCounter: Delegate;
+  pendingInvoiceLine: Delegate;
   pushSubscription: Delegate;
   notificationPreference: Delegate;
   pendingPush: Delegate;
@@ -518,7 +523,7 @@ export async function createPrismaRepository(): Promise<Repository> {
        * faire sans course. Une lecture préalable rouvrirait exactement la
        * fenêtre que ce code ferme.
        */
-      async issueForPeriod(invoice, year, advance) {
+      async issueForPeriod(invoice, year, advance, consumePendingLineIds = []) {
         try {
           return await db.$transaction(async (tx) => {
             const counter = await tx.invoiceCounter.upsert({
@@ -544,6 +549,22 @@ export async function createPrismaRepository(): Promise<Repository> {
                 currentPeriodEnd: new Date(advance.periodEnd),
               },
             });
+
+            if (consumePendingLineIds.length > 0) {
+              // `invoiceId: null` dans la condition : si un autre cycle les a
+              // déjà portées, on n'en marque aucune et le compte ne tombe
+              // pas juste. Porter des lignes sans les marquer les referait
+              // payer le mois suivant.
+              const marquees = await tx.pendingInvoiceLine.updateMany({
+                where: { id: { in: consumePendingLineIds }, invoiceId: null },
+                data: { invoiceId: row.id as string },
+              });
+              if (marquees.count !== consumePendingLineIds.length) {
+                throw new Error(
+                  `Lignes en attente déjà portées ailleurs : ${marquees.count} marquée(s) sur ${consumePendingLineIds.length}. Facture annulée.`,
+                );
+              }
+            }
 
             return { invoice: toInvoice(row), created: true };
           });
@@ -596,6 +617,34 @@ export async function createPrismaRepository(): Promise<Repository> {
           }),
         });
         return toInvoice(row);
+      },
+    },
+
+    pendingLines: {
+      async add(subscriptionId, lines) {
+        const enregistrees = [];
+        for (const line of lines) {
+          const row = await db.pendingInvoiceLine.create({
+            data: {
+              id: generateId('pline'),
+              subscriptionId,
+              label: line.label,
+              quantity: line.quantity,
+              unitCents: line.unitCents,
+              totalCents: line.totalCents,
+              kind: line.kind,
+            },
+          });
+          enregistrees.push(toPendingLine(row));
+        }
+        return enregistrees;
+      },
+      async listPending(subscriptionId) {
+        const rows = await db.pendingInvoiceLine.findMany({
+          where: { subscriptionId, invoiceId: null },
+          orderBy: { createdAt: 'asc' },
+        });
+        return rows.map(toPendingLine);
       },
     },
 
@@ -1132,6 +1181,22 @@ function toPosCredential(row: Row): PosCredentialRecord {
     secretHash: String(row.secretHash),
     createdAt: iso(row.createdAt),
     ...(row.lastUsedAt ? { lastUsedAt: iso(row.lastUsedAt) } : {}),
+  };
+}
+
+function toPendingLine(row: Row): PendingLineRecord {
+  return {
+    id: row.id as string,
+    subscriptionId: row.subscriptionId as string,
+    line: {
+      label: row.label as string,
+      quantity: Number(row.quantity),
+      unitCents: Number(row.unitCents),
+      totalCents: Number(row.totalCents),
+      kind: row.kind as InvoiceLine['kind'],
+    },
+    createdAt: (row.createdAt as Date).toISOString(),
+    invoiceId: (row.invoiceId as string | null) ?? null,
   };
 }
 

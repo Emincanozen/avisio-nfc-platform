@@ -120,7 +120,7 @@ du service de push simulé est auto-signé. **À ne jamais utiliser en productio
 | Suggestion de réponse et publication | Parcours réel dans l'interface |
 | Tableau de bord et indicateurs | Parcours réel |
 | Benchmark anonymisé (k-anonymat) | 12 tests, refus sous 5 pairs vérifié |
-| Facturation : émission, numérotation | 34 tests + back-office réel ; une période une facture, prouvé sous concurrence réelle contre PostgreSQL |
+| Facturation : émission, numérotation, prorata | 37 tests + back-office réel ; une période une facture et un prorata porté une seule fois, prouvés contre PostgreSQL réel |
 | PDF de facture et de rapport | PDF générés et relus page par page |
 | Relances et suspension | Déclenchement réel depuis le back-office |
 | Intégration caisse (webhook signé) | Appel externe réel via `pos-webhook-demo.mjs` |
@@ -142,7 +142,6 @@ du service de push simulé est auto-signé. **À ne jamais utiliser en productio
 | Fonctionnalité | Pourquoi | Effort estimé |
 |---|---|---|
 | Encaissement automatique (mandat SEPA) | Demande un contrat prestataire | 1 à 2 semaines |
-| **Prorata d'un changement d'offre** | Calculé et affiché au back-office, mais **jamais enregistré** : la facture suivante ne le porte pas. Un changement d'offre en cours de mois n'est donc facturé ni à la hausse ni à la baisse | 1 à 2 jours |
 | Envoi de SMS | Demande un contrat opérateur | 3 à 5 jours |
 | Résumé hebdomadaire | Canal prévu, contenu à composer | 2 à 3 jours |
 | Plaquettes physiques | Hors périmètre logiciel, traité séparément | — |
