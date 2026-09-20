@@ -63,7 +63,7 @@ démarrage. Ajouter une dépendance externe, c'est ajouter son mode dégradé.
 
 ```bash
 npm run dev          # API (4000) + interface (3000), mode démonstration
-npm test             # 306 tests, sans base ni réseau
+npm test             # 317 tests, sans base ni réseau
 npm run typecheck    # src + test + scripts (voir plus bas)
 npm run build        # build de production
 ```

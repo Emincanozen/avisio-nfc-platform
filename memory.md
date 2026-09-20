@@ -4,7 +4,7 @@ Mémoire structurée et durable, destinée à toute intelligence artificielle
 reprenant Avisio. Ce n'est pas une transcription de conversations : c'est
 l'état, les décisions et ce qui reste.
 
-**Dernière mise à jour : 19 septembre 2026, commit `a31fc16`.**
+**Dernière mise à jour : 19 septembre 2026, commit `4e5b14b`.**
 
 ---
 
