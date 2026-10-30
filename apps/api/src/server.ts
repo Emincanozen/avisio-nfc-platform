@@ -92,10 +92,8 @@ const timers = [
  * arrivé, plutôt que de calculer un délai jusqu'au prochain 1er — un processus
  * redémarré au mauvais moment sauterait sinon le mois.
  */
-timers.push(
-  schedule('rapports mensuels', 3_600_000,
-    creerPlanificationMensuelle(() => app.ctx.reports.runMonthly())),
-);
+const envoyerRapportsMensuels = creerPlanificationMensuelle(() => app.ctx.reports.runMonthly());
+timers.push(schedule('rapports mensuels', 3_600_000, envoyerRapportsMensuels));
 
 const shutdown = async (signal: string): Promise<void> => {
   app.log.info(`${signal} reçu, arrêt en cours.`);
@@ -109,6 +107,10 @@ process.on('SIGINT', () => void shutdown('SIGINT'));
 process.on('SIGTERM', () => void shutdown('SIGTERM'));
 
 await app.listen({ port: env.port, host: '0.0.0.0' });
+// Un démarrage à 23 h le premier ne doit pas attendre le lendemain.
+void envoyerRapportsMensuels().catch((erreur: unknown) => {
+  app.log.error({ erreur }, 'Rapports mensuels au démarrage en échec.');
+});
 app.log.info(`Avisio API — ${describeMode()}`);
 app.log.info(
   `Ingestion toutes les ${env.ingestIntervalMinutes} min · facturation toutes les ${env.billingIntervalHours} h.`,

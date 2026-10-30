@@ -3,7 +3,7 @@ import { creerPlanificationMensuelle } from '../src/services/monthly-schedule.js
 
 describe('Planification mensuelle', () => {
   it('envoie après un démarrage le premier, une seule fois par mois et année', async () => {
-    let date = new Date('2026-11-01T00:00:00Z');
+    let date = new Date('2026-11-01T23:30:00Z');
     let appels = 0;
     const executer = creerPlanificationMensuelle(async () => { appels++; return { errors: [] }; }, () => date);
     await executer(); await executer(); expect(appels).toBe(1);
@@ -19,7 +19,7 @@ describe('Planification mensuelle', () => {
       appels++;
       if (appels === 1) throw new Error('Indisponible');
       return { errors: appels === 2 ? ['Échec'] : [] };
-    }, () => new Date('2026-11-01T00:00:00Z'));
+    }, () => new Date('2026-11-01T23:30:00Z'));
     await expect(executer()).rejects.toThrow('Indisponible');
     await expect(executer()).rejects.toThrow('incomplets');
     await executer(); await executer(); expect(appels).toBe(3);
@@ -32,7 +32,7 @@ describe('Planification mensuelle', () => {
       appels++;
       await new Promise<void>(resolve => { terminer = resolve; });
       return { errors: [] };
-    }, () => new Date('2026-11-01T00:00:00Z'));
+    }, () => new Date('2026-11-01T23:30:00Z'));
     const premier = executer();
     await executer(); expect(appels).toBe(1);
     terminer(); await premier;
