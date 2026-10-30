@@ -76,11 +76,11 @@ curl -H 'accept-language: it-IT,it;q=0.9' http://localhost:4000/public/tag/k7m2p
 npm test
 ```
 
-306 tests : 174 sur le domaine métier (tarification, facturation, routage,
-conformité, NLP, tendances, benchmark, fidélité, notifications, rapport,
-caisse, import) et 132 tests d’intégration de l’API — dont la limitation de
-débit et le cloisonnement entre établissements. Ils tournent sans base de
-données, sans Docker et sans réseau.
+399 tests : 233 sur le domaine métier et 166 sur l’API et sa planification.
+Ils couvrent notamment la tarification, la conformité, le routage, la facturation,
+les notifications, l’import, la limitation de débit et le cloisonnement entre
+établissements. Ils tournent sans base de données, sans Docker et sans réseau.
+Les essais PostgreSQL et HTTP sont séparés, voir [la revue](REVIEW.md).
 
 ```bash
 npm run typecheck   # TypeScript strict, fichiers de test et scripts compris

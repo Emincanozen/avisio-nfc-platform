@@ -406,14 +406,14 @@ Volontairement peu nombreuses.
 | Paquet | Rôle |
 |---|---|
 | `fastify` 5 | API |
-| `zod` 3 | Validation |
+| `zod` 4 | Validation |
 | `@fastify/jwt`, `@fastify/cors` | Sessions, CORS |
 | `@prisma/client`, `prisma` 6 | PostgreSQL |
 | `@anthropic-ai/sdk` | Modèle de langage |
 | `pdfkit` | Factures et rapports |
 | `web-push` | Notifications |
 | `next` 15, `react` 19 | Interface |
-| `vitest` 3, `typescript` 5.7, `tsx` | Outillage |
+| `vitest` 5, `typescript` 5.7, `tsx` | Outillage |
 
 Aucune bibliothèque d'interface, aucun ORM au-dessus de Prisma, aucun
 framework de tests au-delà de Vitest. L'analyseur CSV est écrit à la main :
@@ -427,7 +427,7 @@ Dans l'ordre, du moins cher au plus cher :
 
 ```bash
 npm run typecheck    # couvre src, test ET scripts
-npm test             # 306 tests
+npm test             # 399 tests
 npm run build
 ```
 

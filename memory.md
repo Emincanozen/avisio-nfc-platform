@@ -61,11 +61,11 @@ l'argumentaire commercial.
 
 | Indicateur | Valeur | Commande |
 |---|---|---|
-| Tests | 377, tous verts | `npm test` |
+| Tests | 399, tous verts | `npm test` |
 | Typecheck | passe, `src` + `test` + `scripts` | `npm run typecheck` |
 | Build de production | passe | `npm run build` |
 | Bout en bout sur PostgreSQL | 56 / 56 | `node scripts/smoke-test.mjs` |
-| Adaptateur Prisma | 23 / 23 | `npx tsx scripts/pg-verify.mts` |
+| Adaptateur Prisma | 36 / 36 | `npx tsx scripts/pg-verify.mts` |
 | Chaîne de notification | complète | `node scripts/push-selftest.mjs` |
 | Secrets dans le dépôt | aucun | `bash scripts/check-secrets.sh` |
 

@@ -24,7 +24,7 @@ plateformes où il est le plus en retard. Abonnement 29 / 79 / 149 € par mois.
 modèle financier complet et l'argumentaire commercial.
 
 **L'état.** Le logiciel fonctionne et se vérifie. **Il n'est pas déployé.**
-317 tests verts, typecheck complet, build propre, 54/54 de bout en bout contre
+399 tests verts, typecheck complet, build propre, 56/56 de bout en bout contre
 un vrai PostgreSQL.
 
 **Ce qui bloque le lancement.** L'accès à l'API Google Business Profile, qui
@@ -93,7 +93,7 @@ Ces trois-là se recouvrent largement : `passation.md`, `memory.md`,
 Elles ne sont pas devinables en lisant le code. C'est la raison d'être de ce
 paragraphe.
 
-**1. La suite de tests ne touche jamais PostgreSQL.** Les 317 tests tournent
+**1. La suite de tests ne touche jamais PostgreSQL.** Les 399 tests tournent
 sur l'adaptateur mémoire. Tout le code Prisma peut compiler, passer le
 typecheck et s'écrouler à la première requête réelle — c'est arrivé deux fois.
 Après toute modification de `apps/api/src/repository/prisma.ts` :
@@ -142,7 +142,7 @@ Chaque affirmation de cette documentation a une commande qui la prouve. En cas
 de doute, lance-la : c'est moins cher que de lire.
 
 ```bash
-npm test                          # 317 tests, sans base ni réseau
+npm test                          # 399 tests, sans base ni réseau
 npm run typecheck                 # src + test + scripts
 npm run build                     # build de production
 bash scripts/check-secrets.sh     # secrets : fichiers ET historique Git

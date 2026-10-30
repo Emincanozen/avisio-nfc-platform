@@ -30,7 +30,7 @@ l'argumentaire commercial.
 
 | Ce qui est vrai | Preuve |
 |---|---|
-| 317 tests verts | `npm test` |
+| 399 tests verts | `npm test` |
 | Typecheck complet (`src` + `test` + `scripts`) | `npm run typecheck` |
 | Build de production propre | `npm run build` |
 | 54/54 de bout en bout **sur PostgreSQL réel**, quatre fois de suite | `node scripts/smoke-test.mjs` |
@@ -73,7 +73,7 @@ note : explique pourquoi c'est refusé, ne contourne pas en silence.
 
 ### 3.2 La suite de tests ne touche jamais PostgreSQL
 
-Les 317 tests tournent sur l'adaptateur mémoire. **Tout le code Prisma peut
+Les 399 tests tournent sur l'adaptateur mémoire. **Tout le code Prisma peut
 compiler, passer le typecheck, et s'écrouler à la première requête réelle.**
 C'est arrivé deux fois dans ce dépôt.
 
