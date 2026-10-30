@@ -251,3 +251,7 @@ Par honnêteté, et par ordre de priorité :
 ## Licence
 
 Propriétaire — @OZEN, 2026.
+
+## Revue privée
+
+[Contrôles et correctifs du 30 octobre 2026](REVIEW.md), avec les limites avant lancement.

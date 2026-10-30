@@ -331,3 +331,7 @@ PostgreSQL 16, conteneur jetable sur le port 5433 :
 
 **Un audit trouve des défauts, il ne prouve pas leur absence.** Ce tableau
 dit ce qui a été cherché et trouvé, pas que le reste est sain.
+
+## Revue du 30 octobre 2026
+
+Correction du déclenchement des rapports mensuels après un démarrage le premier du mois, avec trois tests de régression. Vitest 5 et Zod 4 vérifiés. Résultats : 399 tests, typage, build, 36 contrôles PostgreSQL et 56 contrôles HTTP. L'autotest push local reste non validé ; les intégrations externes ne sont pas annoncées comme exercées. Des alertes de dépendances restent à traiter. Voir [la revue détaillée](../REVIEW.md) pour les limites du planificateur, de l'audit et des contrôles de secrets.

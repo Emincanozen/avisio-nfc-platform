@@ -18,6 +18,7 @@ import { formatConfigRefusal, productionConfigProblems, productionConfigWarnings
 import { buildApp } from './app.js';
 import { capabilities, describeMode, env } from './env.js';
 import { createRepository } from './repository/index.js';
+import { createMonthlySchedule } from './services/monthly-schedule.js';
 
 /**
  * Contrôle de configuration, avant toute connexion.
@@ -91,14 +92,9 @@ const timers = [
  * arrivé, plutôt que de calculer un délai jusqu'au prochain 1er — un processus
  * redémarré au mauvais moment sauterait sinon le mois.
  */
-let lastReportMonth = new Date().getUTCMonth();
 timers.push(
-  schedule('rapports mensuels', 3_600_000, async () => {
-    const month = new Date().getUTCMonth();
-    if (new Date().getUTCDate() !== 1 || month === lastReportMonth) return;
-    lastReportMonth = month;
-    await app.ctx.reports.runMonthly();
-  }),
+  schedule('rapports mensuels', 3_600_000,
+    createMonthlySchedule(() => app.ctx.reports.runMonthly())),
 );
 
 const shutdown = async (signal: string): Promise<void> => {

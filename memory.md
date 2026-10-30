@@ -669,3 +669,7 @@ délai long), déploiement (1.2).
   répétée, et c'est ce qui rend la documentation de ce projet utilisable : une
   affirmation invérifiée présentée comme acquise fait plus de dégâts qu'une
   fonctionnalité manquante.
+
+## Revue du 30 octobre 2026
+
+Correction du déclenchement des rapports mensuels après un démarrage le premier du mois, avec trois tests de régression. Vitest 5 et Zod 4 vérifiés. Résultats : 399 tests, typage, build, 36 contrôles PostgreSQL et 56 contrôles HTTP. L'autotest push local reste non validé ; les intégrations externes ne sont pas annoncées comme exercées. Des alertes de dépendances restent à traiter. Voir [la revue détaillée](REVIEW.md) pour les limites du planificateur, de l'audit et des contrôles de secrets.
