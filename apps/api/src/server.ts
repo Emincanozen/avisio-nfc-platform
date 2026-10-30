@@ -18,7 +18,7 @@ import { formatConfigRefusal, productionConfigProblems, productionConfigWarnings
 import { buildApp } from './app.js';
 import { capabilities, describeMode, env } from './env.js';
 import { createRepository } from './repository/index.js';
-import { createMonthlySchedule } from './services/monthly-schedule.js';
+import { creerPlanificationMensuelle } from './services/monthly-schedule.js';
 
 /**
  * Contrôle de configuration, avant toute connexion.
@@ -94,7 +94,7 @@ const timers = [
  */
 timers.push(
   schedule('rapports mensuels', 3_600_000,
-    createMonthlySchedule(() => app.ctx.reports.runMonthly())),
+    creerPlanificationMensuelle(() => app.ctx.reports.runMonthly())),
 );
 
 const shutdown = async (signal: string): Promise<void> => {

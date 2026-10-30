@@ -3,25 +3,25 @@
  * Le verrou ne dure que le temps du traitement ; un échec reste réessayable.
  * Ce garde-fou est local au processus, pas une déduplication persistante.
  */
-export function createMonthlySchedule(
-  send: () => Promise<{ errors: string[] }>,
-  now: () => Date = () => new Date(),
+export function creerPlanificationMensuelle(
+  envoyer: () => Promise<{ errors: string[] }>,
+  maintenant: () => Date = () => new Date(),
 ): () => Promise<void> {
-  let lastPeriod: string | undefined;
-  let running = false;
+  let dernierePeriode: string | undefined;
+  let enCours = false;
   return async () => {
-    const date = now();
-    const period = `${date.getUTCFullYear()}-${date.getUTCMonth()}`;
-    if (date.getUTCDate() !== 1 || lastPeriod === period || running) return;
-    running = true;
+    const date = maintenant();
+    const periode = `${date.getUTCFullYear()}-${date.getUTCMonth()}`;
+    if (date.getUTCDate() !== 1 || dernierePeriode === periode || enCours) return;
+    enCours = true;
     try {
-      const result = await send();
-      if (result.errors.length > 0) {
-        throw new Error(`Rapports mensuels incomplets : ${result.errors.length} échec(s).`);
+      const resultat = await envoyer();
+      if (resultat.errors.length > 0) {
+        throw new Error(`Rapports mensuels incomplets : ${resultat.errors.length} échec(s).`);
       }
-      lastPeriod = period;
+      dernierePeriode = periode;
     } finally {
-      running = false;
+      enCours = false;
     }
   };
 }
