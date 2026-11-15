@@ -1,0 +1,16 @@
+node_modules/
+dist/
+.next/
+out/
+*.tsbuildinfo
+coverage/
+.DS_Store
+data/
+*.log
+*.sqlite
+*.db
+
+# Environment variables
+.env
+.env.*
+!.env.example

@@ -1,0 +1,43 @@
+{
+  "name": "avisio",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Avisio — NFC customer review collection, smart routing, and multi-location reputation management platform",
+  "keywords": [
+    "nfc",
+    "customer-reviews",
+    "reputation-management",
+    "nextjs",
+    "fastify",
+    "prisma",
+    "typescript"
+  ],
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "engines": {
+    "node": ">=20.11"
+  },
+  "scripts": {
+    "dev": "concurrently -n api,web -c cyan,magenta \"npm run dev -w @avisio/api\" \"npm run dev -w @avisio/web\"",
+    "build": "npm run build -w @avisio/core && npm run build -w @avisio/api && npm run build -w @avisio/web",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc -b packages/core apps/api --pretty false && tsc -p tsconfig.typecheck.json --pretty false && npm run typecheck -w @avisio/web",
+    "lint": "npm run typecheck",
+    "db:up": "docker compose -f infra/docker-compose.yml up -d",
+    "db:down": "docker compose -f infra/docker-compose.yml down",
+    "db:push": "prisma db push --schema apps/api/prisma/schema.prisma",
+    "db:studio": "prisma studio --schema apps/api/prisma/schema.prisma",
+    "seed": "tsx --conditions=development apps/api/src/scripts/seed.ts"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "concurrently": "^9.1.2",
+    "prisma": "^6.2.1",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.3",
+    "vitest": "^5.0.5"
+  }
+}

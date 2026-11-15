@@ -1,0 +1,521 @@
+// Modèle de données Avisio — PostgreSQL.
+//
+// Souveraineté : l'instance de production est hébergée en France (OVHcloud
+// Gravelines ou AWS eu-west-3). Aucun avis ni contact ne sort de l'UE.
+//
+// Minimisation RGPD : ni le programme de fidélité ni l'intégration caisse ne
+// stockent de coordonnées en clair — seulement un condensat.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Plan {
+  essentiel
+  pro
+  premium
+}
+
+enum Addon {
+  negative_reviews
+  extra_platform
+  analytics
+  loyalty
+}
+
+enum Platform {
+  google
+  tripadvisor
+  facebook
+  yelp
+  thefork
+}
+
+enum Sector {
+  restaurant
+  bar
+  hotel
+  retail
+  beauty
+  health
+  other
+}
+
+enum ReviewStatus {
+  new
+  draft_ready
+  // Valide par le gerant, publication NON confirmee par la plateforme.
+  reply_pending
+  // Publie ET confirme. Rien d autre ne merite ce statut.
+  answered
+  // La plateforme a refuse la publication.
+  reply_failed
+  ignored
+}
+
+enum AlertType {
+  negative_review
+  theme_trend
+  rating_drop
+}
+
+enum AlertSeverity {
+  info
+  warning
+  critical
+}
+
+enum TagMaterial {
+  sticker
+  chevalet
+  premium
+}
+
+enum LoyaltyChannel {
+  sms
+  email
+}
+
+enum ManagerRole {
+  owner
+  admin
+}
+
+enum SubscriptionStatus {
+  trialing
+  active
+  past_due
+  suspended
+  canceled
+}
+
+enum InvoiceStatus {
+  draft
+  open
+  paid
+  void
+  uncollectible
+}
+
+model Manager {
+  id             String          @id
+  email          String          @unique
+  passwordHash   String
+  name           String
+  role           ManagerRole     @default(owner)
+  createdAt      DateTime        @default(now())
+  establishments Establishment[] @relation("ManagerEstablishments")
+  pushSubscriptions PushSubscription[]
+
+  @@map("managers")
+}
+
+model Establishment {
+  id                String   @id
+  name              String
+  sector            Sector
+  postalCode        String
+  nafCode           String?
+  plan              Plan     @default(essentiel)
+  addons            Addon[]  @default([])
+  committed12Months Boolean  @default(false)
+  brandTone         String   @default("professionnel et courtois")
+  defaultLocale     String   @default("fr")
+  createdAt         DateTime @default(now())
+
+  managers       Manager[]       @relation("ManagerEstablishments")
+  platformLinks  PlatformLink[]
+  tags           NfcTag[]
+  scans          ScanEvent[]
+  reviews        Review[]
+  alerts         Alert[]
+  loyaltyMembers LoyaltyMember[]
+  subscription   Subscription?
+  invoices       Invoice[]
+  notificationPreference NotificationPreference?
+  posTickets     PosTicket[]
+  googleConnection GoogleConnection?
+
+  // Le benchmark interroge (secteur, code postal) sur toute la base.
+  @@index([sector, postalCode])
+  @@index([nafCode, postalCode])
+  @@map("establishments")
+}
+
+model PlatformLink {
+  id              String    @id @default(uuid())
+  establishmentId String
+  platform        Platform
+  reviewUrl       String
+  externalId      String?
+  enabled         Boolean   @default(true)
+  reviewCount     Int       @default(0)
+  routedScans     Int       @default(0)
+  averageRating   Float?
+  lastSyncedAt    DateTime?
+
+  establishment Establishment @relation(fields: [establishmentId], references: [id], onDelete: Cascade)
+
+  @@unique([establishmentId, platform])
+  @@map("platform_links")
+}
+
+model NfcTag {
+  id              String      @id
+  establishmentId String
+  label           String
+  slug            String      @unique
+  material        TagMaterial @default(sticker)
+  scanCount       Int         @default(0)
+  lastScanAt      DateTime?
+  createdAt       DateTime    @default(now())
+
+  establishment Establishment @relation(fields: [establishmentId], references: [id], onDelete: Cascade)
+  scans         ScanEvent[]
+
+  @@index([establishmentId])
+  @@map("nfc_tags")
+}
+
+model ScanEvent {
+  id              String   @id
+  tagId           String
+  establishmentId String
+  platform        Platform
+  locale          String   @default("fr")
+  userAgent       String?
+  createdAt       DateTime @default(now())
+
+  tag           NfcTag        @relation(fields: [tagId], references: [id], onDelete: Cascade)
+  establishment Establishment @relation(fields: [establishmentId], references: [id], onDelete: Cascade)
+
+  @@index([establishmentId, createdAt])
+  @@map("scan_events")
+}
+
+model Review {
+  id              String       @id
+  establishmentId String
+  platform        Platform
+  externalId      String
+  author          String
+  rating          Int
+  comment         String
+  publishedAt     DateTime
+  ingestedAt      DateTime     @default(now())
+  // Provenance : "sync" (connecteur de plateforme) ou "import" (export chargé
+  // à la main en attendant l'accès API). La distinction existe pour qu'aucun
+  // chiffre ne laisse croire à une connexion en direct qui n'existe pas.
+  source          String       @default("sync")
+  status          ReviewStatus @default(new)
+  replyText       String?
+  repliedAt       DateTime?
+
+  // Résultat du pipeline NLP, dénormalisé pour éviter une jointure sur le
+  // chemin chaud du dashboard.
+  sentiment      String?
+  sentimentScore Float?
+  themes         String[] @default([])
+  keywords       String[] @default([])
+  language       String?
+  analysisEngine String?
+
+  establishment Establishment @relation(fields: [establishmentId], references: [id], onDelete: Cascade)
+  alerts        Alert[]
+
+  // Idempotence de l'ingestion : un avis de plateforme n'entre qu'une fois.
+  @@unique([establishmentId, platform, externalId])
+  @@index([establishmentId, publishedAt])
+  @@index([establishmentId, status])
+  @@map("reviews")
+}
+
+model Alert {
+  id              String        @id
+  establishmentId String
+  type            AlertType
+  severity        AlertSeverity @default(info)
+  title           String
+  body            String
+  reviewId        String?
+  createdAt       DateTime      @default(now())
+  readAt          DateTime?
+
+  establishment Establishment @relation(fields: [establishmentId], references: [id], onDelete: Cascade)
+  review        Review?       @relation(fields: [reviewId], references: [id], onDelete: SetNull)
+
+  @@index([establishmentId, createdAt])
+  @@map("alerts")
+}
+
+model LoyaltyMember {
+  id              String         @id
+  establishmentId String
+  contactHash     String
+  channel         LoyaltyChannel
+  points          Int            @default(0)
+  createdAt       DateTime       @default(now())
+  lastEarnedAt    DateTime?
+
+  establishment Establishment @relation(fields: [establishmentId], references: [id], onDelete: Cascade)
+
+  @@unique([establishmentId, contactHash])
+  @@map("loyalty_members")
+}
+
+// ---------------------------------------------------------------------------
+// Facturation
+// ---------------------------------------------------------------------------
+
+model Subscription {
+  id                 String             @id
+  establishmentId    String             @unique
+  plan               Plan
+  addons             Addon[]            @default([])
+  extraPlatforms     Int                @default(0)
+  tags               Int                @default(1)
+  committed12Months  Boolean            @default(false)
+  status             SubscriptionStatus @default(active)
+  startedAt          DateTime
+  currentPeriodStart DateTime
+  currentPeriodEnd   DateTime
+  trialEndsAt        DateTime?
+  cancelAt           DateTime?
+  canceledAt         DateTime?
+
+  establishment Establishment @relation(fields: [establishmentId], references: [id], onDelete: Cascade)
+  invoices      Invoice[]
+  pendingLines  PendingInvoiceLine[]
+
+  // La facturation balaie les abonnements dont la période est échue.
+  @@index([status, currentPeriodEnd])
+  @@map("subscriptions")
+}
+
+model Invoice {
+  id               String        @id
+  // Numérotation légale : continue, sans rupture, une séquence par année.
+  number           String        @unique
+  establishmentId  String
+  subscriptionId   String
+  status           InvoiceStatus @default(open)
+  periodStart      DateTime
+  periodEnd        DateTime
+  issuedAt         DateTime      @default(now())
+  dueAt            DateTime
+  paidAt           DateTime?
+  lines            Json
+  subtotalCents    Int
+  vatCents         Int
+  totalCents       Int
+  paymentReference String?
+  remindersSent    Int           @default(0)
+
+  establishment Establishment @relation(fields: [establishmentId], references: [id], onDelete: Cascade)
+  subscription  Subscription  @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
+
+  @@index([establishmentId, issuedAt])
+  @@index([status, dueAt])
+  // Une période, une facture. C'est la seule garantie qui tienne quel que
+  // soit le nombre de processus : deux cycles de facturation concurrents
+  // produisaient deux factures valides pour le même mois, chacune avec son
+  // numéro légal, et le client était prélevé deux fois. Reproduit le
+  // 21 septembre 2026 contre PostgreSQL réel avant correction.
+  //
+  // Le code applicatif s'appuie dessus plutôt que de la doubler : la
+  // violation de contrainte *est* le signal « déjà facturée ».
+  @@unique([subscriptionId, periodStart])
+  @@map("invoices")
+}
+
+/**
+ * Lignes en attente de facturation : prorata d'un changement d'offre,
+ * principalement.
+ *
+ * Elles existaient déjà en mémoire vive — `changePlan` les calculait, les
+ * affichait au back-office, puis les jetait. Un client qui montait en gamme
+ * le 3 du mois n'était donc facturé ni le complément ni l'avoir : ni lui ni
+ * l'exploitant n'y perdaient au hasard, personne ne payait rien.
+ *
+ * Une ligne consommée n'est pas supprimée : `invoiceId` dit sur quelle
+ * facture elle est partie. Supprimer ferait disparaître la justification
+ * d'un montant porté sur une pièce comptable.
+ */
+model PendingInvoiceLine {
+  id             String   @id
+  subscriptionId String
+  label          String
+  quantity       Int
+  unitCents      Int
+  totalCents     Int
+  kind           String
+  createdAt      DateTime @default(now())
+  /** Null tant que la ligne attend. Renseigné dans la transaction d'émission. */
+  invoiceId      String?
+
+  subscription Subscription @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
+
+  // La facturation ne cherche que les lignes en attente d'un abonnement.
+  @@index([subscriptionId, invoiceId])
+  @@map("pending_invoice_lines")
+}
+
+/**
+ * Compteur de numérotation, une ligne par année.
+ * Incrémenté dans la même transaction que la création de la facture : c'est ce
+ * qui garantit l'absence de trou dans la séquence.
+ */
+model InvoiceCounter {
+  year     Int @id
+  sequence Int @default(0)
+
+  @@map("invoice_counters")
+}
+
+// ---------------------------------------------------------------------------
+// Notifications
+// ---------------------------------------------------------------------------
+
+model PushSubscription {
+  id        String   @id
+  managerId String
+  endpoint  String   @unique
+  p256dh    String
+  auth      String
+  userAgent String?
+  createdAt DateTime @default(now())
+  lastUsedAt DateTime?
+
+  manager Manager @relation(fields: [managerId], references: [id], onDelete: Cascade)
+
+  @@index([managerId])
+  @@map("push_subscriptions")
+}
+
+model NotificationPreference {
+  establishmentId String  @id
+  // { "negative_review": ["email","push"], … }
+  channels        Json
+  quietHoursStart Int?
+  quietHoursEnd   Int?
+  utcOffsetHours  Int     @default(2)
+
+  establishment Establishment @relation(fields: [establishmentId], references: [id], onDelete: Cascade)
+
+  @@map("notification_preferences")
+}
+
+/** File des push différés par les heures calmes. */
+model PendingPush {
+  id        String   @id
+  managerId String
+  title     String
+  body      String
+  url       String?
+  sendAt    DateTime
+  sentAt    DateTime?
+  createdAt DateTime @default(now())
+
+  @@index([sentAt, sendAt])
+  @@map("pending_pushes")
+}
+
+// ---------------------------------------------------------------------------
+// Intégration caisse
+// ---------------------------------------------------------------------------
+
+model PosTicket {
+  id              String    @id
+  establishmentId String
+  externalId      String
+  closedAt        DateTime
+  totalCents      Int
+  // Condensat du contact : jamais l'e-mail ni le téléphone en clair.
+  contactHash     String?
+  contactChannel  String?
+  reference       String?
+  invitedAt       DateTime?
+  createdAt       DateTime  @default(now())
+
+  establishment Establishment @relation(fields: [establishmentId], references: [id], onDelete: Cascade)
+
+  // Idempotence : une caisse qui rejoue un ticket ne le duplique pas.
+  @@unique([establishmentId, externalId])
+  @@index([establishmentId, closedAt])
+  @@map("pos_tickets")
+}
+
+/** Clé d'API d'une caisse, pour signer ses appels webhook. */
+model PosCredential {
+  establishmentId String   @id
+  vendor          String   @default("generic")
+  // Condensat de la clé : elle n'est montrée qu'une fois, à la création.
+  secretHash      String
+  createdAt       DateTime @default(now())
+  lastUsedAt      DateTime?
+
+  @@map("pos_credentials")
+}
+
+// ---------------------------------------------------------------------------
+// Limitation de debit
+// ---------------------------------------------------------------------------
+
+/**
+ * Compteur de fenetre pour la limitation de debit.
+ *
+ * En base et non en memoire : plusieurs instances d'API partagent alors le
+ * meme budget. Un compteur par processus diviserait la protection par le
+ * nombre d'instances et se remettrait a zero a chaque redeploiement, ce qui
+ * est exactement le moment ou un attaquant persistant reprend la main.
+ *
+ * La cle porte le perimetre, l'identite et le debut de fenetre : une ligne
+ * par fenetre, jamais mise a jour apres son expiration.
+ */
+model RateCounter {
+  key       String   @id
+  count     Int      @default(0)
+  expiresAt DateTime
+
+  // Le balayage des fenetres expirees se fait par cet index.
+  @@index([expiresAt])
+  @@map("rate_counters")
+}
+
+// ---------------------------------------------------------------------------
+// Connexion Google par etablissement
+// ---------------------------------------------------------------------------
+
+/**
+ * Autorisation OAuth donnee par le proprietaire d'une fiche Google.
+ *
+ * Une ligne par etablissement, et non une cle globale dans l'environnement :
+ * la fiche appartient au client, personne ne peut consentir a sa place, et
+ * retirer un client du parc doit revoquer son acces et rien d'autre.
+ *
+ * Le jeton de rafraichissement est scelle (AES-256-GCM, cf. services/secrets).
+ * Il donne acces a la fiche jusqu'a revocation : en clair dans une table, une
+ * sauvegarde egaree suffirait a le livrer.
+ */
+model GoogleConnection {
+  establishmentId    String    @id
+  refreshTokenSealed String
+  scope              String
+  locationName       String?
+  locationTitle      String?
+  authorizedBy       String?
+  connectedAt        DateTime  @default(now())
+  lastSyncAt         DateTime?
+  // Derniere erreur de synchronisation : une connexion rompue en silence est
+  // pire que pas de connexion, le client se croit couvert sans l'etre.
+  lastError          String?
+
+  establishment Establishment @relation(fields: [establishmentId], references: [id], onDelete: Cascade)
+
+  @@map("google_connections")
+}

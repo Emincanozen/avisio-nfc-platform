@@ -1,0 +1,145 @@
+<svg width="1200" height="340" viewBox="0 0 1200 340" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#080c18"/>
+      <stop offset="50%" stop-color="#0f172a"/>
+      <stop offset="100%" stop-color="#020617"/>
+    </linearGradient>
+    <linearGradient id="primaryGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#6366f1"/>
+      <stop offset="50%" stop-color="#8b5cf6"/>
+      <stop offset="100%" stop-color="#38bdf8"/>
+    </linearGradient>
+    <linearGradient id="nfcGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#818cf8"/>
+      <stop offset="100%" stop-color="#c084fc"/>
+    </linearGradient>
+    <linearGradient id="cardGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#1e293b" stop-opacity="0.9"/>
+      <stop offset="100%" stop-color="#0f172a" stop-opacity="0.95"/>
+    </linearGradient>
+    <filter id="glow" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="26" result="blur"/>
+      <feComposite in="SourceGraphic" in2="blur" operator="over"/>
+    </filter>
+    <pattern id="grid" width="30" height="30" patternUnits="userSpaceOnUse">
+      <path d="M 30 0 L 0 0 0 30" fill="none" stroke="#334155" stroke-width="0.75" stroke-opacity="0.3"/>
+    </pattern>
+  </defs>
+
+  <!-- Background Base -->
+  <rect width="1200" height="340" rx="16" fill="url(#bgGrad)"/>
+  <rect width="1200" height="340" rx="16" fill="url(#grid)"/>
+
+  <!-- Ambient Glow Spheres -->
+  <circle cx="150" cy="80" r="140" fill="#6366f1" opacity="0.14" filter="url(#glow)"/>
+  <circle cx="1020" cy="180" r="160" fill="#a855f7" opacity="0.12" filter="url(#glow)"/>
+  <circle cx="620" cy="300" r="130" fill="#38bdf8" opacity="0.08" filter="url(#glow)"/>
+
+  <!-- Card Border -->
+  <rect x="0.5" y="0.5" width="1199" height="339" rx="15.5" stroke="#334155" stroke-opacity="0.6"/>
+
+  <!-- Left Content Area -->
+  <g transform="translate(64, 48)">
+    <!-- Category Pill -->
+    <rect width="258" height="28" rx="14" fill="#6366f1" fill-opacity="0.12" stroke="#6366f1" stroke-opacity="0.4" stroke-width="1"/>
+    <circle cx="14" cy="14" r="5" fill="#6366f1"/>
+    <text x="26" y="19" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="11" font-weight="700" fill="#a5b4fc" letter-spacing="1.5">ENTERPRISE REPUTATION SAAS</text>
+
+    <!-- Main Title -->
+    <text x="0" y="82" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="44" font-weight="900" fill="#ffffff" letter-spacing="-0.5">
+      Avisio NFC Platform
+    </text>
+
+    <!-- Subtitle / Tagline -->
+    <text x="0" y="118" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="17" font-weight="500" fill="#94a3b8">
+      Multi-Location NFC Review Acceleration · Smart Routing &amp; Local SEO Hub
+    </text>
+
+    <!-- Description Paragraph -->
+    <text x="0" y="148" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="13.5" font-weight="400" fill="#64748b">
+      Strict DGCCRF / Google Anti-Gating Compliance · Live Business Profile Sync · Fastify &amp; Next.js 15
+    </text>
+
+    <!-- Feature Badges -->
+    <g transform="translate(0, 182)">
+      <!-- Badge 1: Contactless NFC & QR -->
+      <rect width="146" height="32" rx="8" fill="#1e293b" stroke="#334155" stroke-width="1"/>
+      <text x="73" y="21" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="12" font-weight="600" fill="#818cf8" text-anchor="middle">📡 NFC &amp; Dynamic QR</text>
+
+      <!-- Badge 2: Anti-Gating Compliant -->
+      <rect x="156" width="168" height="32" rx="8" fill="#1e293b" stroke="#334155" stroke-width="1"/>
+      <text x="240" y="21" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="12" font-weight="600" fill="#34d399" text-anchor="middle">⚖️ Anti-Gating Compliant</text>
+
+      <!-- Badge 3: Multi-Location Admin -->
+      <rect x="334" width="154" height="32" rx="8" fill="#1e293b" stroke="#334155" stroke-width="1"/>
+      <text x="411" y="21" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="12" font-weight="600" fill="#38bdf8" text-anchor="middle">🏢 Multi-Location Hub</text>
+
+      <!-- Badge 4: Google API Sync -->
+      <rect x="498" width="140" height="32" rx="8" fill="#1e293b" stroke="#334155" stroke-width="1"/>
+      <text x="568" y="21" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="12" font-weight="600" fill="#facc15" text-anchor="middle">🔄 Google Sync API</text>
+    </g>
+  </g>
+
+  <!-- Right Side Interactive NFC Plaque & Terminal Mockup -->
+  <g transform="translate(770, 36)">
+    <!-- Main Plaque Card Background -->
+    <rect width="366" height="268" rx="14" fill="url(#cardGrad)" stroke="#334155" stroke-width="1.5"/>
+    
+    <!-- Window Bar -->
+    <path d="M0 14 Q0 0 14 0 H352 Q366 0 366 14 V34 H0 Z" fill="#0f172a"/>
+    <circle cx="18" cy="17" r="4.5" fill="#ef4444"/>
+    <circle cx="34" cy="17" r="4.5" fill="#eab308"/>
+    <circle cx="50" cy="17" r="4.5" fill="#22c55e"/>
+    <text x="183" y="22" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="11" font-weight="600" fill="#64748b" text-anchor="middle">AVISIO TERMINAL — SMART ROUTING</text>
+
+    <!-- Content: NFC Plaque Preview Mockup -->
+    <g transform="translate(24, 52)">
+      <!-- NFC Plaque Visual -->
+      <rect width="138" height="188" rx="10" fill="#090d16" stroke="#4f46e5" stroke-width="1.5"/>
+      
+      <!-- NFC Waves Icon -->
+      <path d="M54 36 A22 22 0 0 1 84 36" stroke="#818cf8" stroke-width="2.5" stroke-linecap="round" fill="none"/>
+      <path d="M48 30 A30 30 0 0 1 90 30" stroke="#818cf8" stroke-width="2.5" stroke-linecap="round" fill="none" opacity="0.65"/>
+      <path d="M42 24 A38 38 0 0 1 96 24" stroke="#818cf8" stroke-width="2.5" stroke-linecap="round" fill="none" opacity="0.35"/>
+      
+      <text x="69" y="66" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="11" font-weight="800" fill="#ffffff" text-anchor="middle">TOUCHEZ ICI</text>
+      <text x="69" y="80" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="9" font-weight="500" fill="#94a3b8" text-anchor="middle">AVEC VOTRE SMARTPHONE</text>
+
+      <!-- Stars -->
+      <text x="69" y="112" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="14" font-weight="700" fill="#facc15" text-anchor="middle">★★★★★</text>
+
+      <!-- QR Code Square Mini Placeholder -->
+      <rect x="47" y="128" width="44" height="44" rx="4" fill="#ffffff"/>
+      <rect x="52" y="133" width="14" height="14" fill="#000000"/>
+      <rect x="73" y="133" width="13" height="13" fill="#000000"/>
+      <rect x="52" y="154" width="14" height="13" fill="#000000"/>
+      <rect x="71" y="151" width="16" height="16" fill="#6366f1"/>
+
+      <!-- Right Side Live Stats Panel -->
+      <g transform="translate(154, 0)">
+        <!-- Stat 1 -->
+        <rect width="164" height="54" rx="7" fill="#0f172a" stroke="#334155" stroke-width="1"/>
+        <text x="12" y="20" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="10" font-weight="600" fill="#94a3b8">Note Moyenne</text>
+        <text x="12" y="42" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="18" font-weight="900" fill="#ffffff">4.92 <tspan font-size="12" font-weight="700" fill="#facc15">★</tspan></text>
+        <text x="152" y="38" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="10" font-weight="700" fill="#10b981" text-anchor="end">+0.3 pts</text>
+
+        <!-- Stat 2 -->
+        <g transform="translate(0, 64)">
+          <rect width="164" height="54" rx="7" fill="#0f172a" stroke="#334155" stroke-width="1"/>
+          <text x="12" y="20" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="10" font-weight="600" fill="#94a3b8">Scans NFC &amp; QR</text>
+          <text x="12" y="42" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="18" font-weight="900" fill="#ffffff">1,480</text>
+          <text x="152" y="38" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="10" font-weight="700" fill="#38bdf8" text-anchor="end">+34%</text>
+        </g>
+
+        <!-- Stat 3: Routing Compliance Badge -->
+        <g transform="translate(0, 128)">
+          <rect width="164" height="54" rx="7" fill="#0f172a" stroke="#10b981" stroke-opacity="0.4" stroke-width="1"/>
+          <text x="12" y="20" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="10" font-weight="700" fill="#10b981">CONFORMITÉ ANTI-GATING</text>
+          <text x="12" y="36" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="10" font-weight="500" fill="#94a3b8">Accès direct avis publics</text>
+          <text x="12" y="48" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="9" font-weight="500" fill="#64748b">Signalement privé optionnel</text>
+        </g>
+      </g>
+    </g>
+  </g>
+</svg>

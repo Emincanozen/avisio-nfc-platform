@@ -1,0 +1,13 @@
+# Normalise les fins de ligne dans le dépôt : LF partout, quelle que soit la
+# machine qui commite. Sans cela, un aller-retour Windows/macOS produit des
+# diffs entiers sur des fichiers dont rien n'a changé.
+* text=auto eol=lf
+
+# Fichiers binaires : jamais de conversion.
+*.png binary
+*.jpg binary
+*.pdf binary
+*.ico binary
+
+# Le verrou de dépendances ne gagne rien à être relu dans les revues.
+package-lock.json linguist-generated=true -diff

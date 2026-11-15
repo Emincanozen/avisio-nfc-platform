@@ -1,0 +1,161 @@
+# Intégration continue.
+#
+# Trois vérifications, dans l'ordre du moins cher au plus cher, et une
+# quatrième qui exerce ce que les autres ne touchent pas.
+#
+# Le job `postgres` existe parce que la suite de tests tourne sur l'adaptateur
+# mémoire : sans lui, tout l'adaptateur Prisma peut compiler, passer le
+# typecheck, et s'écrouler à la première requête réelle. C'est arrivé.
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# Une nouvelle poussée annule la vérification en cours sur la même branche :
+# inutile de payer deux fois pour un état dépassé.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verification:
+    name: Typecheck, tests, build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - run: npm ci
+
+      # Couvre `src`, `test` ET `scripts`. Les tsconfig de build n'incluent que
+      # `src` : sans cette passe, une doublure de service incomplète compile et
+      # n'échoue qu'à l'exécution.
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Tests
+        run: npm test
+
+      - name: Build de production
+        run: npm run build
+
+  postgres:
+    name: Adaptateur PostgreSQL
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: avisio
+          POSTGRES_PASSWORD: avisio
+          POSTGRES_DB: avisio
+        ports:
+          - 5433:5432
+        options: >-
+          --health-cmd "pg_isready -U avisio -d avisio"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+
+    env:
+      DATABASE_URL: postgresql://avisio:avisio@localhost:5433/avisio
+      # Base jetable, créée et détruite avec le job : aucune donnée réelle.
+      NODE_ENV: test
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - run: npm ci
+
+      - name: Schéma
+        run: npx prisma db push --schema apps/api/prisma/schema.prisma
+
+      - name: Client Prisma
+        run: npx prisma generate --schema apps/api/prisma/schema.prisma
+
+      - name: Jeu de démonstration
+        run: npm run seed
+
+      # Exerce le SQL brut de la limitation de débit — y compris sous
+      # concurrence — les connexions Google et la colonne de provenance.
+      #
+      # `--conditions=development` : ce script lit l'adaptateur en TypeScript,
+      # qui importe `@avisio/core`. Sans la condition, la résolution part sur
+      # `dist`, qui n'est pas encore construit à cette étape.
+      - name: Vérification de l'adaptateur
+        run: npx tsx --conditions=development scripts/pg-verify.mts
+
+      # Étape décisive : elle exécute le JavaScript COMPILÉ, seul endroit où
+      # se manifeste un `exports` de paquet mal orienté. Les 323 tests
+      # tournent sur la source et ne peuvent pas l'attraper.
+      # Le serveur compilé et le smoke test sont exécutés dans la même étape pour
+      # garantir que le processus d'arrière-plan ne soit pas interrompu par le runner.
+      - name: Démarrage de l'API compilée et test de bout en bout
+        run: |
+          set -euo pipefail
+          npm run build -w @avisio/core
+          npm run build -w @avisio/api
+
+          node apps/api/dist/server.js > /tmp/api.log 2>&1 &
+          api_pid=$!
+
+          started=0
+          for i in $(seq 1 30); do
+            if curl -sf http://localhost:4000/health > /dev/null; then
+              echo "API compilée démarrée après ${i}s"
+              curl -sf http://localhost:4000/health
+              started=1
+              break
+            fi
+            # Un processus mort ne répondra jamais : inutile d'attendre 30 s
+            # pour afficher ensuite un échec de curl qui ne dit rien.
+            if ! kill -0 "$api_pid" 2>/dev/null; then
+              echo "::error::L'API compilée s'est arrêtée au démarrage."
+              cat /tmp/api.log
+              exit 1
+            fi
+            sleep 1
+          done
+
+          if [ "$started" -ne 1 ]; then
+            echo "::error::L'API compilée n'a pas répondu en 30 s."
+            cat /tmp/api.log
+            exit 1
+          fi
+
+          # 54 contrôles par le réseau, contre un serveur réel sur PostgreSQL.
+          echo "Exécution des contrôles de bout en bout..."
+          node scripts/smoke-test.mjs
+          kill "$api_pid" 2>/dev/null || true
+
+  secrets:
+    name: Aucun secret dans le dépôt
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Tout l'historique : un secret retiré d'un fichier reste dans les
+          # commits précédents, et c'est là qu'on le trouve.
+          fetch-depth: 0
+
+      - name: Recherche de secrets committés
+        run: bash scripts/check-secrets.sh

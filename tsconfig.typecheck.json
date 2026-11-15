@@ -1,0 +1,27 @@
+{
+  // Vérification de types couvrant AUSSI les fichiers de test.
+  //
+  // Les tsconfig de build n'incluent que `src` : les tests échappaient donc au
+  // typage. Une doublure incomplète (un service auquel il manque une méthode de
+  // l'interface) passait la compilation et n'échouait qu'à l'exécution, avec
+  // une erreur sans rapport apparent avec la cause.
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "composite": false,
+    "declaration": false,
+    "declarationMap": false,
+    "types": ["node"],
+    "paths": {
+      "@avisio/core": ["./packages/core/src/index.ts"]
+    }
+  },
+  "include": [
+    "packages/core/src/**/*.ts",
+    "packages/core/test/**/*.ts",
+    "apps/api/src/**/*.ts",
+    "apps/api/test/**/*.ts",
+    "scripts/**/*.ts",
+    "vitest.config.ts"
+  ]
+}
